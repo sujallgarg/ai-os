@@ -7,6 +7,7 @@ from tools.gmail.thread import GmailThreadReader
 
 from agents.email.summarize import EmailSummarizer
 from tools.gmail.label import GmailLabels
+from tools.gmail.modify import GmailModifier
 
 
 class EmailAgent(BaseAgent):
@@ -22,6 +23,7 @@ class EmailAgent(BaseAgent):
         self.thread_reader = GmailThreadReader()
 
         self.label = GmailLabels()
+        self.modifier = GmailModifier()
         self.summarizer = EmailSummarizer()
 
     def execute(self, task):
@@ -80,7 +82,21 @@ class EmailAgent(BaseAgent):
             return self.thread_reader.get_thread(
                 thread_id
             )
-
+            
+        if action == "mark_read":
+            message_id = task.get(
+                "message_id"
+            )
+            return self.modifier.mark_as_read(
+                message_id
+            )
+        if action == "mark_unread":
+            message_id = task.get(
+                "message_id"
+            )
+            return self.modifier.mark_as_unread(
+                message_id
+            )
         
 
         if action == "summarize":
