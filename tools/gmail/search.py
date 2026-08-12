@@ -7,6 +7,18 @@ Searches a user's Gmail mailbox using Gmail search syntax.
 from tools.gmail.client import GmailClient
 
 
+LABEL_QUERIES = {
+    "important": "is:important",
+    "starred": "is:starred",
+    "unread": "is:unread",
+    "sent": "in:sent",
+    "draft": "in:drafts",
+    "trash": "in:trash",
+    "spam": "in:spam",
+    "inbox": "in:inbox"
+}
+
+
 class GmailSearcher:
 
     def __init__(self):
@@ -14,7 +26,6 @@ class GmailSearcher:
         self.service = self.client.get_service()
 
     def search(self, query: str, limit: int = 10):
-
         if not query or not query.strip():
             raise ValueError("Search query cannot be empty.")
 
@@ -30,11 +41,9 @@ class GmailSearcher:
         )
 
         messages = results.get("messages", [])
-
         emails = []
 
         for message in messages:
-
             email = (
                 self.service.users()
                 .messages()
@@ -52,21 +61,11 @@ class GmailSearcher:
                 .execute()
             )
 
-            headers = email.get(
-                "payload",
-                {}
-            ).get(
-                "headers",
-                []
-            )
-
+            headers = email.get("payload", {}).get("headers", [])
             header_data = {}
 
             for header in headers:
-
-                header_data[
-                    header["name"].lower()
-                ] = header["value"]
+                header_data[header["name"].lower()] = header["value"]
 
             emails.append({
                 "id": message["id"],
@@ -79,3 +78,13 @@ class GmailSearcher:
             })
 
         return emails
+
+    def search_by_label(self, label: str, limit: int = 10):
+        query = LABEL_QUERIES.get(label.lower())
+        if not query:
+            raise ValueError(f"Unsupported label: {label}")
+
+        return self.search(
+            query=query,
+            limit=limit
+        )

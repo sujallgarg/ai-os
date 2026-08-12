@@ -6,7 +6,7 @@ from tools.gmail.body import GmailBodyReader
 from tools.gmail.thread import GmailThreadReader
 
 from agents.email.summarize import EmailSummarizer
-
+from tools.gmail.label import GmailLabels
 
 
 class EmailAgent(BaseAgent):
@@ -21,6 +21,7 @@ class EmailAgent(BaseAgent):
 
         self.thread_reader = GmailThreadReader()
 
+        self.label = GmailLabels()
         self.summarizer = EmailSummarizer()
 
     def execute(self, task):
@@ -29,6 +30,21 @@ class EmailAgent(BaseAgent):
             "action",
             "read"
         )
+
+        if action == "labels":
+
+            return self.label.list_labels()
+            
+        if action == "label_search":
+            
+            label = task.get(
+                "label",
+                ""
+            ) 
+            
+            return self.searcher.search_by_label(
+                label=label
+            )
 
         if action == "search":
 
@@ -64,6 +80,8 @@ class EmailAgent(BaseAgent):
             return self.thread_reader.get_thread(
                 thread_id
             )
+
+        
 
         if action == "summarize":
 
