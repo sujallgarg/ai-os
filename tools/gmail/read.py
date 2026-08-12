@@ -52,9 +52,11 @@ class GmailReader:
 
             emails.append({
                 "id": msg["id"],
+                "thread_id": message.get("threadId", msg.get("threadId", "")),
                 "subject": _clean(subject),
                 "from": _clean(sender),
                 "snippet": _clean(snippet)
             })
+
 
         return emails

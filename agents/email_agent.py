@@ -3,8 +3,10 @@ from agents.base_agents import BaseAgent
 from tools.gmail.read import GmailReader
 from tools.gmail.search import GmailSearcher
 from tools.gmail.body import GmailBodyReader
+from tools.gmail.thread import GmailThreadReader
 
 from agents.email.summarize import EmailSummarizer
+
 
 
 class EmailAgent(BaseAgent):
@@ -16,6 +18,8 @@ class EmailAgent(BaseAgent):
         self.searcher = GmailSearcher()
 
         self.body_reader = GmailBodyReader()
+
+        self.thread_reader = GmailThreadReader()
 
         self.summarizer = EmailSummarizer()
 
@@ -50,6 +54,16 @@ class EmailAgent(BaseAgent):
                 )
 
             return self.reader.get_unread_messages()
+
+        if action == "thread":
+
+            thread_id = task.get(
+                "thread_id"
+            )
+
+            return self.thread_reader.get_thread(
+                thread_id
+            )
 
         if action == "summarize":
 
