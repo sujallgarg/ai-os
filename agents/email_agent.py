@@ -97,6 +97,20 @@ class EmailAgent(BaseAgent):
             return self.modifier.mark_as_unread(
                 message_id
             )
+        if action == "archive":
+            message_id = task.get(
+                "message_id"
+            )
+            return self.modifier.archive(
+                message_id
+            )
+        if action == "trash":
+            message_id = task.get(
+                "message_id"
+            )
+            return self.modifier.move_to_trash(
+                message_id
+            ) 
         
 
         if action == "summarize":
