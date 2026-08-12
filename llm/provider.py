@@ -1,16 +1,21 @@
 from openai import OpenAI
-from config.settings import OPENAI_API_KEY
+from config.settings import GROQ_API_KEY
+
 
 class LLMProvider:
-    def __init_(self):
-        self.client=OpenAI(api_key=OPENAI_API_KEY)
-    def chat(self,messages):
-        response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages
+    def __init__(self):
+        self.client = OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1"
         )
 
+    def chat(self, messages):
+        response = self.client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages
+        )
         return response.choices[0].message.content
+
 
 
         

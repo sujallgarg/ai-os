@@ -1,6 +1,7 @@
 class ToolRegistry:
-    def __init_(self):
-        self.tool={}
+    def __init__(self):
+        self.tool = {}
+
     def register(self,name,func):
         self.tool[name]=func
 

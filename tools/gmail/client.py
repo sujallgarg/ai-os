@@ -4,9 +4,9 @@ Creates a reusable Gmail API client.
 Every Gmail operation should use this client.
 """
 
-from test_auth import credentials
 from googleapiclient.discovery import build 
 from tools.gmail.auth import GmailAuth
+
 
 class GmailClient:
     def __init__(self):

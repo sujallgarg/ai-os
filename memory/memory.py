@@ -12,4 +12,4 @@ class Memory:
 
     def recall(self,text):
 
-        return self.vector.search(text)
+        return self.vector.searched(text)
