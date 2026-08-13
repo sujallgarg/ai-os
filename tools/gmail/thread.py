@@ -1,8 +1,8 @@
 """
 Gmail Thread Reader
 
-Retrieves an entire Gmail conversation and converts
-its messages into structured data for the AI agent.
+Retrieves an entire Gmail conversation and returns
+the messages in a structured format.
 """
 
 from tools.gmail.client import GmailClient
@@ -20,11 +20,11 @@ class GmailThreadReader:
         self.body_reader = GmailBodyReader()
 
     def get_thread(self, thread_id: str):
-        if not thread_id or not str(thread_id).strip():
-            raise ValueError("thread_id is required.")
 
-        thread_id = str(thread_id).strip()
-
+        if not thread_id:
+            raise ValueError(
+                "thread_id is required."
+            )
 
         thread = (
             self.service.users()
@@ -67,4 +67,3 @@ class GmailThreadReader:
             "message_count": len(conversation),
             "messages": conversation
         }
-        

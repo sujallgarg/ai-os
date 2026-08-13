@@ -20,7 +20,8 @@ from tools.gmail.modify import GmailModifier
 from tools.gmail.draft import GmailDraftManager
 from security.approval import ApprovalManager
 from tools.gmail.send import GmailSender
-
+from tools.gmail.attachments import GmailAttachmentManager
+from agents.email.classifier import EmailClassifier
 class EmailAgent(BaseAgent):
 
     def __init__(self):
@@ -37,7 +38,8 @@ class EmailAgent(BaseAgent):
         self.approval = ApprovalManager()
         self.sender = GmailSender()
         self.draft_manager = GmailDraftManager()
-
+        self.attachments = GmailAttachmentManager()
+        self.classifier = EmailClassifier()
     def execute(self, task):
 
         action = task.get(
@@ -258,3 +260,50 @@ class EmailAgent(BaseAgent):
                 "action": "forward",
                 "draft": draft
             }
+        if action == "attachments":
+
+            message_id = task.get(
+                "message_id"
+            )
+
+            return self.attachments.list_attachments(
+                message_id
+    )
+        if action == "download_attachment":
+
+            message_id = task.get(
+                "message_id"
+            )
+
+            attachment_id = task.get(
+                "attachment_id"
+            )
+
+            filename = task.get(
+                "filename"
+            )
+
+            return self.attachments.download_attachment(
+                message_id=message_id,
+        attachment_id=attachment_id,
+        filename=filename
+    )
+    
+        if action == "classify":
+
+            message_id = task.get(
+                "message_id"
+            )
+
+        email = self.body_reader.get_email(
+            message_id
+        )
+
+        classification = self.classifier.classify(
+            email
+    )
+
+        return {
+        "message_id": message_id,
+        "classification": classification
+    }
