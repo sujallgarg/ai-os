@@ -10,7 +10,7 @@ from tools.gmail.label import GmailLabels
 from tools.gmail.modify import GmailModifier
 from tools.gmail.draft import GmailDraftManager
 from security.approval import ApprovalManager
-
+from tools.gmail.send import GmailSender
 
 class EmailAgent(BaseAgent):
 
@@ -26,6 +26,7 @@ class EmailAgent(BaseAgent):
         self.draft_generator = EmailDraftGenerator()
         self.draft_manager = GmailDraftManager()
         self.approval = ApprovalManager()
+        self.sender = GmailSender()
 
     def execute(self, task):
 
@@ -173,4 +174,23 @@ class EmailAgent(BaseAgent):
         body=body,
         thread_id=thread_id
     )
-    
+        if action == "send_email":
+
+            request = self.approval.create_request(
+        action="send_email",
+        description="Send an email",
+        data={
+            "to": task.get("to"),
+            "subject": task.get("subject"),
+            "body": task.get("body"),
+            "thread_id": task.get("thread_id"),
+            "in_reply_to": task.get(
+                "in_reply_to"
+            ),
+            "references": task.get(
+                "references"
+            )
+        }
+    )
+
+        return request
