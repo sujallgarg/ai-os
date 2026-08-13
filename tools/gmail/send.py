@@ -136,3 +136,58 @@ class GmailSender:
             raise ValueError(
                 "Email body is required."
             )
+    def forward_email(
+        self,
+        to: str,
+        original_email: dict,
+        additional_message: str = ""
+    ):
+
+        if not to:
+            raise ValueError(
+                "Recipient email is required."
+            )
+
+        original_from = original_email.get(
+            "from",
+            ""
+        )
+
+        original_subject = original_email.get(
+            "subject",
+            ""
+        )
+
+        original_body = original_email.get(
+            "body",
+            ""
+        )
+
+        original_date = original_email.get(
+            "date",
+            ""
+        )
+
+        subject = original_subject
+
+        if not subject.lower().startswith("fwd:"):
+
+           subject = f"Fwd: {subject}"
+
+        forwarded_content = f"""
+{additional_message}
+
+---------- Forwarded message ----------
+
+From: {original_from}
+Date: {original_date}
+Subject: {original_subject}
+
+{original_body}
+""".strip()
+
+        return self.create_forward_draft(
+            to=to,
+            subject=subject,
+            body=forwarded_content
+        )

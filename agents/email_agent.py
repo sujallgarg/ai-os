@@ -1,3 +1,12 @@
+from agents.email import draft_generator
+from agents.email import draft_generator
+from agents.email import draft_generator
+from agents.email import draft_generator
+from agents.email import draft_generator
+from agents.email import draft_generator
+from agents.email import draft_generator
+from agents.email import draft_generator
+from agents.email import draft_generator
 from agents.base_agents import BaseAgent
 
 from tools.gmail.read import GmailReader
@@ -27,6 +36,7 @@ class EmailAgent(BaseAgent):
         self.draft_manager = GmailDraftManager()
         self.approval = ApprovalManager()
         self.sender = GmailSender()
+        self.draft_manager = GmailDraftManager()
 
     def execute(self, task):
 
@@ -215,3 +225,36 @@ class EmailAgent(BaseAgent):
     )
 
         return request
+
+        if action == "forward":
+
+            message_id = task.get(
+                "message_id"
+            )
+
+            to = task.get(
+                "to"
+            )
+
+            additional_message = task.get(
+                "message",
+                ""
+            )
+
+            original_email = (
+                self.body_reader.get_email(
+                    message_id
+                )
+            )
+
+            draft = self.draft_manager.create_forward_draft(
+                to=to,
+                original_email=original_email,
+                additional_message=additional_message
+            )
+
+            return {
+                "status": "draft_created",
+                "action": "forward",
+                "draft": draft
+            }
