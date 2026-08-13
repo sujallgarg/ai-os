@@ -194,3 +194,24 @@ class EmailAgent(BaseAgent):
     )
 
         return request
+
+        if action == "reply":
+
+            request = self.approval.create_request(
+                action="send_email",
+                description="Reply to an existing Gmail conversation",
+                data={
+                    "to": task.get("to"),
+                    "subject": task.get("subject"),
+            "body": task.get("body"),
+            "thread_id": task.get("thread_id"),
+            "in_reply_to": task.get(
+                "in_reply_to"
+            ),
+            "references": task.get(
+                "references"
+            )
+        }
+    )
+
+        return request

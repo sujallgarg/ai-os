@@ -35,20 +35,16 @@ class ActionExecutor:
         if action == "send_email":
 
             return self.gmail_sender.send_email(
-                to=data.get("to"),
-                subject=data.get("subject"),
-                body=data.get("body"),
-                thread_id=data.get(
-                    "thread_id"
-                ),
-                in_reply_to=data.get(
-                    "in_reply_to"
-                ),
-                references=data.get(
-                    "references"
-                )
-            )
-
-        raise ValueError(
-            f"Unsupported action: {action}"
+            to=data.get("to"),
+            subject=data.get("subject"),
+            body=data.get("body"),
+            thread_id=data.get(
+                "thread_id"
+        ),
+        in_reply_to=data.get(
+            "in_reply_to"
+        ),
+        references=data.get(
+            "references"
         )
+    )

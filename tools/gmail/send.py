@@ -2,10 +2,6 @@
 Gmail Send Manager.
 
 Handles sending new emails and replies.
-
-This class should only be called after the
-application's approval layer has authorized
-the action.
 """
 
 import base64
@@ -42,7 +38,6 @@ class GmailSender:
         message = EmailMessage()
 
         message["To"] = to
-
         message["Subject"] = subject
 
         if in_reply_to:
@@ -85,6 +80,37 @@ class GmailSender:
             "message_id": result.get("id"),
             "thread_id": result.get("threadId")
         }
+
+    def reply_to_thread(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        thread_id: str,
+        in_reply_to: str | None = None,
+        references: str | None = None
+    ):
+
+        if not thread_id:
+
+            raise ValueError(
+                "thread_id is required for a reply."
+            )
+
+        if not in_reply_to:
+
+            raise ValueError(
+                "in_reply_to is required for a reply."
+            )
+
+        return self.send_email(
+            to=to,
+            subject=subject,
+            body=body,
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
+            references=references
+        )
 
     def _validate(
         self,
