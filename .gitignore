@@ -43,6 +43,7 @@ client_secrets*.json
 *.sqlite
 chroma_db/
 .chroma/
+data/
 
 # Logs
 *.log

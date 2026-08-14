@@ -9,11 +9,13 @@ class LLMProvider:
             base_url="https://api.groq.com/openai/v1"
         )
 
-    def chat(self, messages):
-        response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages
-        )
+    def chat(self, messages, **kwargs):
+        params = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": messages,
+            **kwargs
+        }
+        response = self.client.chat.completions.create(**params)
         return response.choices[0].message.content
 
 
