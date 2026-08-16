@@ -1,5 +1,9 @@
-from executor.task_running import (
+from executor.task_runner import (
     TaskRunner
+)
+
+from recovery.manager import (
+    RecoveryManager
 )
 
 
@@ -8,7 +12,8 @@ class TaskExecutor:
     def __init__(
         self,
         agent_manager,
-        log_service=None
+        log_service=None,
+        recovery_manager=None
     ):
 
         self.runner = TaskRunner(
@@ -16,6 +21,11 @@ class TaskExecutor:
             agent_manager,
 
             log_service
+        )
+
+        self.recovery = (
+            recovery_manager
+            or RecoveryManager()
         )
 
     def execute(
@@ -50,6 +60,78 @@ class TaskExecutor:
                     user_id=user_id
                 )
 
+                # --------------------------------
+                # Successful task
+                # --------------------------------
+
+                if result.status == "completed":
+
+                    results[
+                        task.id
+                    ] = result
+
+                    pending.remove(
+                        task
+                    )
+
+                    progress = True
+
+                    break
+
+                # --------------------------------
+                # Failed task
+                # --------------------------------
+
+                recovery = (
+                    self.recovery.handle_failure(
+
+                        task.id,
+
+                        result.error
+                    )
+                )
+
+                print(
+                    f"[Recovery] "
+                    f"Task {task.id}: "
+                    f"{recovery.action}"
+                )
+
+                # --------------------------------
+                # Retry
+                # --------------------------------
+
+                if recovery.action == "RETRY":
+
+                    continue
+
+                # --------------------------------
+                # Ask user
+                # --------------------------------
+
+                if recovery.action == "ASK_USER":
+
+                    results[
+                        task.id
+                    ] = result
+
+                    pending.remove(
+                        task
+                    )
+
+                    progress = True
+
+                    print(
+                        "[Executor] "
+                        "User intervention required."
+                    )
+
+                    break
+
+                # --------------------------------
+                # Permanent failure
+                # --------------------------------
+
                 results[
                     task.id
                 ] = result
@@ -60,9 +142,10 @@ class TaskExecutor:
 
                 progress = True
 
-                if result.status == "failed":
-
-                    return results
+                print(
+                    f"[Executor] "
+                    f"Task {task.id} failed permanently."
+                )
 
                 break
 
