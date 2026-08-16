@@ -1,10 +1,3 @@
-"""
-Task Executor.
-
-Executes decomposed tasks while respecting
-dependencies.
-"""
-
 from executor.task_running import (
     TaskRunner
 )
@@ -14,16 +7,21 @@ class TaskExecutor:
 
     def __init__(
         self,
-        agent_manager
+        agent_manager,
+        log_service=None
     ):
 
         self.runner = TaskRunner(
-            agent_manager
+
+            agent_manager,
+
+            log_service
         )
 
     def execute(
         self,
-        tasks
+        tasks,
+        user_id="system"
     ):
 
         results = {}
@@ -45,13 +43,11 @@ class TaskExecutor:
 
                     continue
 
-                print(
-                    f"\n[Executor] "
-                    f"Executing task {task.id}"
-                )
-
                 result = self.runner.run(
-                    task
+
+                    task,
+
+                    user_id=user_id
                 )
 
                 results[
@@ -65,12 +61,6 @@ class TaskExecutor:
                 progress = True
 
                 if result.status == "failed":
-
-                    print(
-                        f"[Executor] "
-                        f"Stopping because task "
-                        f"{task.id} failed."
-                    )
 
                     return results
 
