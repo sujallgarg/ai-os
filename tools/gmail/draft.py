@@ -6,7 +6,6 @@ Creates drafts in the user's Gmail account.
 This module does NOT send emails.
 """
 
-import test_email_draft
 import base64
 
 from email.message import EmailMessage

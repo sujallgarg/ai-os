@@ -60,3 +60,6 @@ class GmailReader:
 
 
         return emails
+
+    # Alias for convenience
+    get_unread_emails = get_unread_messages
