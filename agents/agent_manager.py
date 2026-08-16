@@ -57,41 +57,41 @@ class AgentManager:
             self.agents.keys()
         )
 
-def execute(
-    self,
-    agent_name: str,
-    task: dict
-):
-
-    if not isinstance(
-        task,
-        dict
+    def execute(
+        self,
+        agent_name: str,
+        task: dict
     ):
 
-        raise TypeError(
-            "Task must be a dictionary."
+        if not isinstance(
+            task,
+            dict
+        ):
+
+            raise TypeError(
+                "Task must be a dictionary."
+            )
+
+        if not task.get("action"):
+
+            raise ValueError(
+                "Task action is required."
+            )
+
+        agent = self.get(
+            agent_name
         )
 
-    if not task.get("action"):
+        if not hasattr(
+            agent,
+            "execute"
+        ):
 
-        raise ValueError(
-            "Task action is required."
+            raise AttributeError(
+                f"Agent '{agent_name}' "
+                "does not support execute()."
+            )
+
+        return agent.execute(
+            task
         )
-
-    agent = self.get(
-        agent_name
-    )
-
-    if not hasattr(
-        agent,
-        "execute"
-    ):
-
-        raise AttributeError(
-            f"Agent '{agent_name}' "
-            "does not support execute()."
-        )
-
-    return agent.execute(
-        task
-    )
