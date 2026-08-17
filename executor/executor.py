@@ -10,7 +10,7 @@ Executes tasks while respecting:
 5. Execution logging
 """
 
-from executor.task_runner import (
+from executor.task_running import (
     TaskRunner
 )
 
