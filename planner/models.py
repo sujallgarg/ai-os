@@ -51,3 +51,5 @@ class ExecutionTask:
     )
 
     status: str = "pending"
+
+    priority: int = 5
