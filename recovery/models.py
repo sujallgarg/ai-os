@@ -17,3 +17,7 @@ class RecoveryDecision:
     modified_parameters: dict = field(
         default_factory=dict
     )
+
+    alternative_agent: str | None = None
+
+    replan_request: dict | None = None

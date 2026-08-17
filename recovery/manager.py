@@ -1,5 +1,5 @@
 """
-Central error recovery manager.
+Central failure recovery manager.
 """
 
 from recovery.retry import (
@@ -14,12 +14,17 @@ from recovery.models import (
     RecoveryDecision
 )
 
+from recovery.replanner import (
+    RecoveryReplanner
+)
+
 
 class RecoveryManager:
 
     def __init__(
         self,
-        max_retries=3
+        max_retries=3,
+        planner=None
     ):
 
         self.retry_manager = (
@@ -32,10 +37,17 @@ class RecoveryManager:
             ErrorAnalyzer()
         )
 
+        self.replanner = (
+            RecoveryReplanner(
+                planner
+            )
+        )
+
     def handle_failure(
         self,
         task_id: int,
-        error: str
+        error: str,
+        task=None
     ):
 
         error_type = (
@@ -46,11 +58,13 @@ class RecoveryManager:
 
         attempts = (
             self.retry_manager
-            .get_attempts(task_id)
+            .get_attempts(
+                task_id
+            )
         )
 
         # --------------------------------
-        # Retryable error
+        # Temporary error
         # --------------------------------
 
         if error_type == "RETRYABLE":
@@ -68,8 +82,8 @@ class RecoveryManager:
                     action="RETRY",
 
                     reason=(
-                        "Temporary error. "
-                        "Retrying task."
+                        "Temporary failure. "
+                        "Retry is safe."
                     ),
 
                     retry_count=(
@@ -88,7 +102,7 @@ class RecoveryManager:
                 action="ASK_USER",
 
                 reason=(
-                    "This task requires "
+                    "The task requires "
                     "user intervention."
                 ),
 
@@ -96,7 +110,40 @@ class RecoveryManager:
             )
 
         # --------------------------------
-        # Unknown/non-retryable
+        # Try replanning
+        # --------------------------------
+
+        if task is not None:
+
+            if self.replanner.should_replan(
+                error,
+                task
+            ):
+
+                request = (
+                    self.replanner
+                    .create_replan_request(
+                        task,
+                        error
+                    )
+                )
+
+                return RecoveryDecision(
+
+                    action="REPLAN",
+
+                    reason=(
+                        "The current execution "
+                        "strategy is not suitable."
+                    ),
+
+                    retry_count=attempts,
+
+                    replan_request=request
+                )
+
+        # --------------------------------
+        # Permanent failure
         # --------------------------------
 
         return RecoveryDecision(
@@ -104,8 +151,8 @@ class RecoveryManager:
             action="FAIL",
 
             reason=(
-                "Task cannot safely "
-                "be retried."
+                "The task cannot be "
+                "safely recovered."
             ),
 
             retry_count=attempts
