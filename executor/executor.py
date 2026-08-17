@@ -1,13 +1,15 @@
 """
-Task Executor.
+Central Task Executor.
 
-Executes tasks while respecting:
+Responsibilities:
 
-1. Dependencies
-2. Task priority
-3. Agent availability
-4. Error recovery
-5. Execution logging
+1. Find tasks whose dependencies are complete.
+2. Select the highest-priority ready task.
+3. Execute the task through TaskRunner.
+4. Handle temporary failures with RetryManager.
+5. Apply backoff between retries.
+6. Pass exhausted failures to RecoveryManager.
+7. Continue executing remaining tasks.
 """
 
 from executor.task_running import (
@@ -22,6 +24,10 @@ from priority.manager import (
     PriorityManager
 )
 
+from retry.manager import (
+    RetryManager
+)
+
 
 class TaskExecutor:
 
@@ -29,22 +35,26 @@ class TaskExecutor:
         self,
         agent_manager,
         log_service=None,
-        recovery_manager=None
+        recovery_manager=None,
+        retry_manager=None,
+        timeout_manager=None
     ):
 
         # --------------------------------
-        # Agent task runner
+        # Task runner
         # --------------------------------
 
         self.runner = TaskRunner(
 
-            agent_manager,
+            agent_manager=agent_manager,
 
-            log_service
+            log_service=log_service,
+
+            timeout_manager=timeout_manager
         )
 
         # --------------------------------
-        # Error recovery
+        # Recovery manager
         # --------------------------------
 
         self.recovery = (
@@ -59,8 +69,24 @@ class TaskExecutor:
         # --------------------------------
 
         self.priority_manager = (
+
             PriorityManager()
         )
+
+        # --------------------------------
+        # Retry manager
+        # --------------------------------
+
+        self.retry_manager = (
+
+            retry_manager
+
+            or RetryManager()
+        )
+
+    # ============================================================
+    # MAIN EXECUTION LOOP
+    # ============================================================
 
     def execute(
         self,
@@ -71,24 +97,23 @@ class TaskExecutor:
         """
         Execute a collection of tasks.
 
-        The executor:
+        Execution order is determined by:
 
-        1. Finds tasks whose dependencies
-           are completed.
-        2. Sorts ready tasks by priority.
-        3. Executes the highest-priority task.
-        4. Handles failures.
-        5. Continues until all tasks finish.
+        1. Dependencies
+        2. Priority
+        3. Execution result
+        4. Retry policy
+        5. Recovery policy
         """
 
         # --------------------------------
-        # Store execution results
+        # Store completed task results
         # --------------------------------
 
         results = {}
 
         # --------------------------------
-        # Copy tasks into pending queue
+        # Pending task queue
         # --------------------------------
 
         pending = list(
@@ -96,17 +121,22 @@ class TaskExecutor:
         )
 
         # --------------------------------
-        # Continue while tasks remain
+        # Main execution loop
         # --------------------------------
 
         while pending:
 
             print(
-                "\n================================"
+                "\n"
+                + "=" * 70
             )
 
             print(
-                "EXECUTOR"
+                "TASK EXECUTOR"
+            )
+
+            print(
+                "=" * 70
             )
 
             print(
@@ -114,13 +144,8 @@ class TaskExecutor:
                 len(pending)
             )
 
-            print(
-                "================================"
-            )
-
             # --------------------------------
-            # Find tasks whose dependencies
-            # are already completed
+            # Find tasks that are ready
             # --------------------------------
 
             ready_tasks = [
@@ -136,16 +161,15 @@ class TaskExecutor:
             ]
 
             # --------------------------------
-            # Make sure at least one task
-            # can be executed
+            # No task can currently run
             # --------------------------------
 
             if not ready_tasks:
 
                 raise RuntimeError(
                     "No executable tasks available. "
-                    "There may be unresolved "
-                    "dependencies."
+                    "Check for unresolved or circular "
+                    "task dependencies."
                 )
 
             # --------------------------------
@@ -190,7 +214,11 @@ class TaskExecutor:
 
             print(
                 "Priority:",
-                task.priority
+                getattr(
+                    task,
+                    "priority",
+                    5
+                )
             )
 
             print(
@@ -209,32 +237,43 @@ class TaskExecutor:
                 user_id=user_id
             )
 
-            # --------------------------------
+            # ====================================================
             # SUCCESS
-            # --------------------------------
+            # ====================================================
 
             if result.status == "completed":
 
                 print(
-                    f"\nTask {task.id} completed."
+                    f"\n✓ Task {task.id} completed."
                 )
+
+                # Store result
 
                 results[
                     task.id
                 ] = result
 
+                # Remove from pending
+
                 pending.remove(
                     task
                 )
 
+                # Reset retry counter because
+                # task eventually succeeded.
+
+                self.retry_manager.reset(
+                    task.id
+                )
+
                 continue
 
-            # --------------------------------
+            # ====================================================
             # FAILURE
-            # --------------------------------
+            # ====================================================
 
             print(
-                f"\nTask {task.id} failed."
+                f"\n✗ Task {task.id} failed."
             )
 
             print(
@@ -242,17 +281,100 @@ class TaskExecutor:
                 result.error
             )
 
-            # --------------------------------
-            # Ask recovery manager
-            # what to do
-            # --------------------------------
+            error = (
+                result.error
+                or "Unknown execution error."
+            )
+
+            # ====================================================
+            # RETRY DECISION
+            # ====================================================
+
+            retry_decision = (
+                self.retry_manager.decide(
+
+                    task_id=task.id,
+
+                    error=error
+                )
+            )
+
+            print(
+                "\nRetry decision:"
+            )
+
+            print(
+                "Should retry:",
+                retry_decision.should_retry
+            )
+
+            print(
+                "Attempt:",
+                retry_decision.attempt
+            )
+
+            print(
+                "Error type:",
+                retry_decision.error_type
+            )
+
+            print(
+                "Delay:",
+                retry_decision.delay
+            )
+
+            print(
+                "Reason:",
+                retry_decision.reason
+            )
+
+            # ====================================================
+            # RETRY
+            # ====================================================
+
+            if retry_decision.should_retry:
+
+                print(
+                    f"\n↻ Retrying task "
+                    f"{task.id}..."
+                )
+
+                # Wait using exponential
+                # backoff.
+
+                self.retry_manager.wait(
+                    retry_decision
+                )
+
+                # IMPORTANT:
+                #
+                # Do not remove the task
+                # from pending.
+                #
+                # It will be selected again
+                # on the next loop.
+
+                continue
+
+            # ====================================================
+            # RETRIES EXHAUSTED / NON-RETRYABLE
+            # ====================================================
+
+            print(
+                "\nRetries unavailable."
+            )
+
+            print(
+                "Sending failure to "
+                "RecoveryManager..."
+            )
 
             recovery = (
                 self.recovery.handle_failure(
 
                     task.id,
 
-                    result.error
+                    error
                 )
             )
 
@@ -275,32 +397,35 @@ class TaskExecutor:
                 recovery.retry_count
             )
 
-            # --------------------------------
-            # RETRY
-            # --------------------------------
+            # ====================================================
+            # RECOVERY: RETRY
+            # ====================================================
+            #
+            # This is included for compatibility
+            # with your existing RecoveryManager.
+            #
+            # Normally RetryManager should handle
+            # retryable failures first.
+            # ====================================================
 
             if recovery.action == "RETRY":
 
                 print(
-                    f"\nRetrying task "
-                    f"{task.id}..."
+                    f"\nRecovery requested "
+                    f"another retry for task "
+                    f"{task.id}."
                 )
-
-                # Don't remove the task
-                # from pending.
-                #
-                # It will be selected again.
 
                 continue
 
-            # --------------------------------
-            # ASK USER
-            # --------------------------------
+            # ====================================================
+            # RECOVERY: ASK USER
+            # ====================================================
 
             if recovery.action == "ASK_USER":
 
                 print(
-                    "\nUser intervention "
+                    "\n⚠ User intervention "
                     "required."
                 )
 
@@ -314,12 +439,37 @@ class TaskExecutor:
 
                 continue
 
-            # --------------------------------
-            # PERMANENT FAILURE
-            # --------------------------------
+            # ====================================================
+            # RECOVERY: REPLAN
+            # ====================================================
+
+            if recovery.action == "REPLAN":
+
+                print(
+                    "\n↻ Task requires "
+                    "replanning."
+                )
+
+                results[
+                    task.id
+                ] = result
+
+                pending.remove(
+                    task
+                )
+
+                # The future Planner /
+                # Supervisor will replace
+                # this task with a new plan.
+
+                continue
+
+            # ====================================================
+            # RECOVERY: FAIL
+            # ====================================================
 
             print(
-                f"\nTask {task.id} "
+                f"\n✗ Task {task.id} "
                 "failed permanently."
             )
 
@@ -331,23 +481,33 @@ class TaskExecutor:
                 task
             )
 
-        # --------------------------------
-        # All tasks completed
-        # --------------------------------
+        # ========================================================
+        # EXECUTION COMPLETE
+        # ========================================================
 
         print(
-            "\n================================"
+            "\n"
+            + "=" * 70
         )
 
         print(
-            "EXECUTION FINISHED"
+            "ALL TASKS PROCESSED"
         )
 
         print(
-            "================================"
+            "=" * 70
+        )
+
+        print(
+            "Completed/processed:",
+            len(results)
         )
 
         return results
+
+    # ============================================================
+    # DEPENDENCY CHECK
+    # ============================================================
 
     def _dependencies_completed(
         self,
@@ -356,12 +516,12 @@ class TaskExecutor:
     ):
 
         """
-        Check whether all dependencies
-        for a task have completed successfully.
+        Return True only when every dependency
+        has completed successfully.
         """
 
         # --------------------------------
-        # Task has no dependencies
+        # No dependencies
         # --------------------------------
 
         if not task.depends_on:
@@ -376,22 +536,25 @@ class TaskExecutor:
             task.depends_on
         ):
 
-            dependency = results.get(
-                dependency_id
+            dependency_result = (
+                results.get(
+                    dependency_id
+                )
             )
 
-            # Dependency hasn't executed yet
-            if dependency is None:
+            # Dependency hasn't run yet.
+
+            if dependency_result is None:
 
                 return False
 
-            # Dependency failed
-            if dependency.status != "completed":
+            # Dependency did not succeed.
+
+            if (
+                dependency_result.status
+                != "completed"
+            ):
 
                 return False
-
-        # --------------------------------
-        # Every dependency succeeded
-        # --------------------------------
 
         return True
