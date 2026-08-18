@@ -1,56 +1,68 @@
 """
-Memory Manager.
-
-Provides a simple interface for storing,
-retrieving and deleting user memories.
+Shared Agent Memory Manager.
 """
 
-import uuid
 from datetime import datetime
 
 from memory.models import Memory
+
 from memory.store import MemoryStore
+
+from memory.permissions import (
+    MemoryPermissionManager
+)
 
 
 class MemoryManager:
 
-    def __init__(self):
+    def __init__(
+        self,
+        store=None,
+        permissions=None
+    ):
 
-        self.store = MemoryStore()
+        self.store = (
+
+            store
+            or MemoryStore()
+        )
+
+        self.permissions = (
+
+            permissions
+            or MemoryPermissionManager()
+        )
+
+    # ============================================================
+    # WRITE MEMORY
+    # ============================================================
 
     def remember(
         self,
-        user_id: str,
-        memory_type: str,
-        key: str,
-        value: str,
-        importance: float = 0.5,
-        source: str = "user"
+        key,
+        value,
+        agent_id,
+        memory_type="shared",
+        importance=5,
+        metadata=None
     ):
 
-        now = datetime.utcnow().isoformat()
-
         memory = Memory(
-
-            id=str(
-                uuid.uuid4()
-            ),
-
-            user_id=user_id,
-
-            memory_type=memory_type,
 
             key=key,
 
             value=value,
 
+            agent_id=agent_id,
+
+            memory_type=memory_type,
+
             importance=importance,
 
-            created_at=now,
-
-            updated_at=now,
-
-            source=source
+            metadata=(
+                metadata
+                or {}
+            )
         )
 
         self.store.save(
@@ -59,20 +71,146 @@ class MemoryManager:
 
         return memory
 
-    def get_user_memories(
+    # ============================================================
+    # READ MEMORY
+    # ============================================================
+
+    def recall(
         self,
-        user_id: str
+        key,
+        agent_id
     ):
 
-        return self.store.get_by_user(
-            user_id
+        memory = self.store.get(
+            key
         )
+
+        if memory is None:
+
+            return None
+
+        # --------------------------------------------------------
+        # Expiration
+        # --------------------------------------------------------
+
+        if (
+            memory.expires_at
+            and memory.expires_at
+            < datetime.utcnow()
+        ):
+
+            self.store.delete(
+                key
+            )
+
+            return None
+
+        # --------------------------------------------------------
+        # Permission
+        # --------------------------------------------------------
+
+        if not self.permissions.can_read(
+
+            agent_id,
+
+            memory
+        ):
+
+            raise PermissionError(
+
+                f"Agent '{agent_id}' "
+                f"cannot read memory "
+                f"'{key}'."
+            )
+
+        return memory
+
+    # ============================================================
+    # SEARCH
+    # ============================================================
+
+    def search(
+        self,
+        agent_id,
+        memory_type=None
+    ):
+
+        memories = []
+
+        for memory in self.store.all():
+
+            # --------------------------------
+            # Type filter
+            # --------------------------------
+
+            if (
+                memory_type
+                and memory.memory_type
+                != memory_type
+            ):
+
+                continue
+
+            # --------------------------------
+            # Permission
+            # --------------------------------
+
+            if not self.permissions.can_read(
+
+                agent_id,
+
+                memory
+            ):
+
+                continue
+
+            memories.append(
+                memory
+            )
+
+        # Highest importance first.
+
+        memories.sort(
+
+            key=lambda memory:
+                memory.importance,
+
+            reverse=True
+        )
+
+        return memories
+
+    # ============================================================
+    # FORGET
+    # ============================================================
 
     def forget(
         self,
-        memory_id: str
+        key,
+        agent_id
     ):
 
-        self.store.delete(
-            memory_id
+        memory = self.store.get(
+            key
         )
+
+        if memory is None:
+
+            return False
+
+        if (
+            memory.agent_id
+            != agent_id
+        ):
+
+            raise PermissionError(
+
+                "Only the owning agent "
+                "can delete this memory."
+            )
+
+        self.store.delete(
+            key
+        )
+
+        return True

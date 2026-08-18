@@ -1,28 +1,35 @@
 """
-Memory data models.
+Models used by the shared agent memory system.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Optional
 
 
 @dataclass
 class Memory:
 
-    id: str
-
-    user_id: str
-
-    memory_type: str
-
     key: str
 
-    value: str
+    value: Any
 
-    importance: float = 0.5
+    agent_id: str
 
-    created_at: str = ""
+    memory_type: str = "shared"
 
-    updated_at: str = ""
+    importance: int = 5
 
-    source: str = "user"
+    created_at: datetime = field(
+        default_factory=datetime.utcnow
+    )
+
+    updated_at: datetime = field(
+        default_factory=datetime.utcnow
+    )
+
+    expires_at: Optional[datetime] = None
+
+    metadata: dict = field(
+        default_factory=dict
+    )

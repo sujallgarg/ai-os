@@ -1,161 +1,74 @@
 """
-SQLite memory storage.
-"""
+Low-level memory storage.
 
-import sqlite3
-from pathlib import Path
+Development implementation:
+in-memory dictionary.
+
+Production implementation:
+PostgreSQL + Redis/vector database.
+"""
 
 
 class MemoryStore:
 
-    def __init__(
-        self,
-        database_path="data/memory.db"
-    ):
+    def __init__(self):
 
-        path = Path(
-            database_path
-        )
+        self._data = {}
 
-        path.parent.mkdir(
-            parents=True,
-            exist_ok=True
-        )
-
-        self.connection = sqlite3.connect(
-            str(path),
-            check_same_thread=False
-        )
-
-        self._create_table()
-
-    def _create_table(self):
-
-        self.connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS memories (
-
-                id TEXT PRIMARY KEY,
-
-                user_id TEXT NOT NULL,
-
-                memory_type TEXT NOT NULL,
-
-                key TEXT NOT NULL,
-
-                value TEXT NOT NULL,
-
-                importance REAL DEFAULT 0.5,
-
-                source TEXT DEFAULT 'user',
-
-                created_at TEXT NOT NULL,
-
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-
-        self.connection.commit()
+    # ============================================================
+    # SAVE
+    # ============================================================
 
     def save(
         self,
         memory
     ):
 
-        self.connection.execute(
-            """
-            INSERT OR REPLACE INTO memories
-            (
-                id,
-                user_id,
-                memory_type,
-                key,
-                value,
-                importance,
-                source,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                memory.id,
-                memory.user_id,
-                memory.memory_type,
-                memory.key,
-                memory.value,
-                memory.importance,
-                memory.source,
-                memory.created_at,
-                memory.updated_at
-            )
-        )
+        self._data[
+            memory.key
+        ] = memory
 
-        self.connection.commit()
+    # ============================================================
+    # GET
+    # ============================================================
 
     def get(
         self,
-        memory_id
+        key
     ):
 
-        cursor = self.connection.execute(
-            """
-            SELECT
-                id,
-                user_id,
-                memory_type,
-                key,
-                value,
-                importance,
-                source,
-                created_at,
-                updated_at
-            FROM memories
-            WHERE id = ?
-            """,
-            (memory_id,)
+        return self._data.get(
+            key
         )
 
-        return cursor.fetchone()
-
-    def get_by_user(
-        self,
-        user_id
-    ):
-
-        cursor = self.connection.execute(
-            """
-            SELECT
-                id,
-                user_id,
-                memory_type,
-                key,
-                value,
-                importance,
-                source,
-                created_at,
-                updated_at
-            FROM memories
-            WHERE user_id = ?
-            ORDER BY importance DESC
-            """,
-            (user_id,)
-        )
-
-        return cursor.fetchall()
+    # ============================================================
+    # DELETE
+    # ============================================================
 
     def delete(
         self,
-        memory_id
+        key
     ):
 
-        self.connection.execute(
-            """
-            DELETE FROM memories
-            WHERE id = ?
-            """,
-            (memory_id,)
+        return self._data.pop(
+            key,
+            None
         )
 
-        self.connection.commit()
+    # ============================================================
+    # ALL
+    # ============================================================
+
+    def all(self):
+
+        return list(
+            self._data.values()
+        )
+
+    # ============================================================
+    # CLEAR
+    # ============================================================
+
+    def clear(self):
+
+        self._data.clear()

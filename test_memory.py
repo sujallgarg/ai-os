@@ -10,7 +10,7 @@ USER_ID = "demo-user"
 
 memory = manager.remember(
 
-    user_id=USER_ID,
+    # user_id=USER_ID,
 
     memory_type="preference",
 

@@ -1,7 +1,8 @@
 """
 Central Task Executor.
 
-Current capabilities:
+Responsibilities
+----------------
 
 1. Dependency-aware execution
 2. Priority-aware execution
@@ -9,36 +10,60 @@ Current capabilities:
 4. Retry handling
 5. Exponential backoff
 6. Failure recovery
-7. Dynamic replanning
-8. Agent handoff support
-9. Human intervention support
-10. Supervisor monitoring
-11. Dynamic agent capability matching
+7. Dynamic agent capability matching
+8. Supervisor monitoring
+9. Dynamic task replanning
+10. Agent handoff support
+11. Human intervention support
+12. Shared agent memory
+13. Execution result tracking
 
-Architecture:
 
-    User Goal
-        ↓
-    Planner
-        ↓
-    Task Graph
-        ↓
-    Capability Matcher
-        ↓
-    Supervisor
-        ↓
-    Executor
-        ↓
-    TaskRunner
-        ↓
-    Agent
-        ↓
-    Tool
-        ↓
-    Result
-        ↓
-    Retry / Recovery / Replan
+Architecture
+------------
+
+                USER GOAL
+                    |
+                    v
+                  PLANNER
+                    |
+                    v
+                TASK GRAPH
+                    |
+                    v
+           CAPABILITY MATCHER
+                    |
+                    v
+               SUPERVISOR
+                    |
+                    v
+                EXECUTOR
+                    |
+                    v
+               TASK RUNNER
+                    |
+                    v
+                  AGENT
+                    |
+             +------+------+
+             |             |
+             v             v
+           TOOL         MEMORY
+             |             |
+             +------+------+
+                    |
+                    v
+                 RESULT
+                    |
+          +---------+---------+
+          |         |         |
+        SUCCESS   RETRY    RECOVERY
+                              |
+                   +----------+----------+
+                   |          |          |
+                 REPLAN    HANDOFF     USER
 """
+
 
 from executor.task_running import TaskRunner
 
@@ -61,34 +86,37 @@ class TaskExecutor:
         retry_manager=None,
         timeout_manager=None,
         supervisor=None,
-        capability_matcher=None
+        capability_matcher=None,
+        memory_manager=None
     ):
         """
-        Initialize the central task executor.
+        Initialize the central executor.
 
         Parameters
         ----------
         agent_manager:
-            Manages available agents and executes them.
+            Manages available agents.
 
         log_service:
-            Records task execution history.
+            Records execution logs.
 
         recovery_manager:
-            Handles failures after retry attempts.
+            Handles failures after retries.
 
         retry_manager:
-            Handles retry decisions and backoff.
+            Controls retry decisions.
 
         timeout_manager:
             Controls execution timeouts.
 
         supervisor:
-            Monitors the overall execution plan.
+            Monitors the complete execution plan.
 
         capability_matcher:
-            Dynamically selects an agent based on
-            required capabilities.
+            Dynamically selects agents.
+
+        memory_manager:
+            Shared memory available to agents.
         """
 
         # ========================================================
@@ -96,11 +124,8 @@ class TaskExecutor:
         # ========================================================
 
         self.runner = TaskRunner(
-
             agent_manager=agent_manager,
-
             log_service=log_service,
-
             timeout_manager=timeout_manager
         )
 
@@ -109,9 +134,7 @@ class TaskExecutor:
         # ========================================================
 
         self.recovery = (
-
             recovery_manager
-
             or RecoveryManager()
         )
 
@@ -120,7 +143,6 @@ class TaskExecutor:
         # ========================================================
 
         self.priority_manager = (
-
             PriorityManager()
         )
 
@@ -129,9 +151,7 @@ class TaskExecutor:
         # ========================================================
 
         self.retry_manager = (
-
             retry_manager
-
             or RetryManager()
         )
 
@@ -140,13 +160,9 @@ class TaskExecutor:
         # ========================================================
 
         self.supervisor = (
-
             supervisor
-
             or SupervisorAgent(
-
-                recovery_manager=
-                    self.recovery
+                recovery_manager=self.recovery
             )
         )
 
@@ -156,6 +172,14 @@ class TaskExecutor:
 
         self.capability_matcher = (
             capability_matcher
+        )
+
+        # ========================================================
+        # SHARED MEMORY
+        # ========================================================
+
+        self.memory_manager = (
+            memory_manager
         )
 
     # ============================================================
@@ -169,52 +193,32 @@ class TaskExecutor:
         goal=None
     ):
         """
-        Execute a collection of tasks.
+        Execute the supplied task list.
 
-        Flow:
+        Tasks are processed according to:
 
-            Tasks
-              ↓
-            Dependencies
-              ↓
-            Ready Tasks
-              ↓
-            Priority
-              ↓
-            Capability Matching
-              ↓
-            Supervisor
-              ↓
-            TaskRunner
-              ↓
-            Agent
-              ↓
-            Success / Failure
-              ↓
-            Retry / Recovery
-
-        Returns
-        -------
-        dict
-            Task ID → TaskResult
+            1. Dependencies
+            2. Priority
+            3. Agent capability
+            4. Supervisor state
+            5. Task execution
+            6. Retry
+            7. Recovery
+            8. Replanning
         """
 
         # ========================================================
-        # VALIDATE TASKS
+        # VALIDATION
         # ========================================================
 
         if tasks is None:
-
             raise ValueError(
                 "tasks cannot be None."
             )
 
-        tasks = list(
-            tasks
-        )
+        tasks = list(tasks)
 
         if not tasks:
-
             print(
                 "[Executor] No tasks to execute."
             )
@@ -228,28 +232,22 @@ class TaskExecutor:
         results = {}
 
         # ========================================================
-        # PENDING TASKS
+        # PENDING TASK QUEUE
         # ========================================================
 
-        pending = list(
-            tasks
-        )
+        pending = list(tasks)
 
         # ========================================================
         # SUPERVISOR START
         # ========================================================
 
         supervisor_goal = (
-
             goal
-
             or f"Execute {len(tasks)} tasks"
         )
 
         self.supervisor.start(
-
             goal=supervisor_goal,
-
             tasks=tasks
         )
 
@@ -276,12 +274,12 @@ class TaskExecutor:
         )
 
         print(
-            "Total tasks:",
+            "Tasks:",
             len(tasks)
         )
 
         # ========================================================
-        # MAIN LOOP
+        # MAIN EXECUTION LOOP
         # ========================================================
 
         while pending:
@@ -320,22 +318,19 @@ class TaskExecutor:
                 for task in pending
 
                 if self._dependencies_completed(
-
                     task,
-
                     results
                 )
             ]
 
             # ====================================================
-            # NO READY TASKS
+            # NO READY TASK
             # ====================================================
 
             if not ready_tasks:
 
                 print(
-                    "\n[Executor] "
-                    "No executable tasks available."
+                    "\n[Executor] No ready tasks."
                 )
 
                 print(
@@ -354,10 +349,8 @@ class TaskExecutor:
                     "  - failed dependency"
                 )
 
-                supervisor_decision = (
-
+                decision = (
                     self.supervisor.decide(
-
                         pending
                     )
                 )
@@ -368,19 +361,16 @@ class TaskExecutor:
 
                 print(
                     "Action:",
-                    supervisor_decision.action
+                    decision.action
                 )
 
                 print(
                     "Reason:",
-                    supervisor_decision.reason
+                    decision.reason
                 )
 
                 raise RuntimeError(
-
-                    "No executable tasks available. "
-                    "Possible circular or unresolved "
-                    "dependencies."
+                    "No executable tasks available."
                 )
 
             # ====================================================
@@ -388,9 +378,7 @@ class TaskExecutor:
             # ====================================================
 
             ready_tasks = (
-
                 self.priority_manager.sort(
-
                     ready_tasks
                 )
             )
@@ -457,13 +445,11 @@ class TaskExecutor:
             )
 
             # ====================================================
-            # DYNAMIC CAPABILITY MATCHING
+            # RESOLVE AGENT
             # ====================================================
 
             agent_selection = (
-                self._resolve_agent(
-                    task
-                )
+                self._resolve_agent(task)
             )
 
             if not agent_selection["success"]:
@@ -474,7 +460,7 @@ class TaskExecutor:
 
                 print(
                     "\n[Capability Matcher] "
-                    "Agent selection failed."
+                    "Could not resolve agent."
                 )
 
                 print(
@@ -482,122 +468,115 @@ class TaskExecutor:
                     error
                 )
 
-                # ----------------------------------------------
-                # Supervisor knows about the failure
-                # ----------------------------------------------
-
                 self.supervisor.task_failed(
-
                     task.id,
-
                     error
                 )
 
-                # ----------------------------------------------
-                # Try recovery
-                # ----------------------------------------------
-
                 recovery = (
-
                     self._recover_task(
-
                         task,
-
                         error
                     )
                 )
 
-                # ----------------------------------------------
-                # Process recovery decision
-                # ----------------------------------------------
-
-                action = (
-                    recovery.action
-                )
-
-                if action == "RETRY":
+                if recovery.action == "RETRY":
 
                     print(
-                        "\n↻ Retrying agent "
-                        "selection."
+                        "\n↻ Retrying agent resolution."
                     )
 
-                    self.retry_manager.wait(
-
+                    retry_decision = (
                         self.retry_manager.decide(
+                            task_id=task.id,
+                            error=error
+                        )
+                    )
 
-                            task.id,
+                    if retry_decision.should_retry:
 
+                        self.retry_manager.wait(
+                            retry_decision
+                        )
+
+                    continue
+
+                if recovery.action == "REPLAN":
+
+                    print(
+                        "\n↻ Agent resolution "
+                        "requires replanning."
+                    )
+
+                    replacement_tasks = (
+                        self._dynamic_replan(
+                            task,
                             error
                         )
                     )
 
+                    results[
+                        task.id
+                    ] = self._failure_result(
+                        task,
+                        error
+                    )
+
+                    pending.remove(task)
+
+                    pending.extend(
+                        replacement_tasks
+                    )
+
                     continue
 
-                if action == "REPLAN":
+                if recovery.action == "HANDOFF":
 
                     print(
-                        "\n↻ Replanning task."
+                        "\n→ Agent handoff required."
                     )
 
                     results[
                         task.id
                     ] = self._failure_result(
-
                         task,
-
                         error
                     )
 
-                    pending.remove(
-                        task
-                    )
+                    pending.remove(task)
 
                     continue
 
-                if action == "ASK_USER":
+                if recovery.action == "ASK_USER":
 
                     print(
-                        "\n⚠ User intervention "
-                        "required."
+                        "\n⚠ User intervention required."
                     )
 
                     results[
                         task.id
                     ] = self._failure_result(
-
                         task,
-
                         error
                     )
 
-                    pending.remove(
-                        task
-                    )
+                    pending.remove(task)
 
                     continue
-
-                # ----------------------------------------------
-                # Permanent failure
-                # ----------------------------------------------
 
                 results[
                     task.id
                 ] = self._failure_result(
-
                     task,
-
                     error
                 )
 
-                pending.remove(
-                    task
-                )
+                pending.remove(task)
 
                 continue
 
             # ====================================================
-            # AGENT WAS SUCCESSFULLY RESOLVED
+            # ASSIGN SELECTED AGENT
             # ====================================================
 
             selected_agent = (
@@ -605,6 +584,8 @@ class TaskExecutor:
             )
 
             if selected_agent:
+
+                task.agent = selected_agent
 
                 print(
                     "\n[Capability Matcher]"
@@ -615,19 +596,19 @@ class TaskExecutor:
                     selected_agent
                 )
 
-                # Set the selected agent on
-                # the task so TaskRunner can use it.
+            # ====================================================
+            # ATTACH SHARED MEMORY
+            # ====================================================
 
-                task.agent = (
-                    selected_agent
-                )
+            self._attach_memory(
+                task
+            )
 
             # ====================================================
             # SUPERVISOR: TASK STARTED
             # ====================================================
 
             self.supervisor.task_started(
-
                 task.id
             )
 
@@ -638,9 +619,7 @@ class TaskExecutor:
             try:
 
                 result = self.runner.run(
-
                     task,
-
                     user_id=user_id
                 )
 
@@ -657,9 +636,7 @@ class TaskExecutor:
 
                 result = (
                     self._failure_result(
-
                         task,
-
                         str(error)
                     )
                 )
@@ -675,13 +652,11 @@ class TaskExecutor:
                 )
 
                 # ----------------------------------------------
-                # Notify supervisor
+                # Supervisor
                 # ----------------------------------------------
 
                 self.supervisor.task_completed(
-
                     task.id,
-
                     result
                 )
 
@@ -694,7 +669,16 @@ class TaskExecutor:
                 ] = result
 
                 # ----------------------------------------------
-                # Remove from pending
+                # Store useful result in memory
+                # ----------------------------------------------
+
+                self._store_result_memory(
+                    task,
+                    result
+                )
+
+                # ----------------------------------------------
+                # Remove task
                 # ----------------------------------------------
 
                 pending.remove(
@@ -702,11 +686,10 @@ class TaskExecutor:
                 )
 
                 # ----------------------------------------------
-                # Reset retries
+                # Reset retry counter
                 # ----------------------------------------------
 
                 self.retry_manager.reset(
-
                     task.id
                 )
 
@@ -717,9 +700,7 @@ class TaskExecutor:
             # ====================================================
 
             error = (
-
                 result.error
-
                 or "Unknown execution error."
             )
 
@@ -733,13 +714,11 @@ class TaskExecutor:
             )
 
             # ====================================================
-            # SUPERVISOR: TASK FAILED
+            # SUPERVISOR FAILURE
             # ====================================================
 
             self.supervisor.task_failed(
-
                 task.id,
-
                 error
             )
 
@@ -748,11 +727,8 @@ class TaskExecutor:
             # ====================================================
 
             retry_decision = (
-
                 self.retry_manager.decide(
-
                     task_id=task.id,
-
                     error=error
                 )
             )
@@ -793,21 +769,17 @@ class TaskExecutor:
             if retry_decision.should_retry:
 
                 print(
-                    f"\n↻ Retrying task "
-                    f"{task.id}..."
+                    f"\n↻ Retrying task {task.id}..."
                 )
 
                 self.retry_manager.wait(
-
                     retry_decision
                 )
-
-                # Keep task in pending.
 
                 continue
 
             # ====================================================
-            # RETRIES EXHAUSTED
+            # RECOVERY
             # ====================================================
 
             print(
@@ -822,16 +794,9 @@ class TaskExecutor:
                 "Starting recovery..."
             )
 
-            # ====================================================
-            # RECOVERY
-            # ====================================================
-
             recovery = (
-
                 self._recover_task(
-
                     task,
-
                     error
                 )
             )
@@ -878,27 +843,42 @@ class TaskExecutor:
                     "\n↻ Dynamic replanning required."
                 )
 
-                if recovery.replan_request:
-
-                    print(
-                        "Replan request:"
+                replacement_tasks = (
+                    self._dynamic_replan(
+                        task,
+                        error
                     )
+                )
 
-                    print(
-                        recovery.replan_request
-                    )
+                # ----------------------------------------------
+                # Save failed result
+                # ----------------------------------------------
 
                 results[
                     task.id
                 ] = result
 
+                # ----------------------------------------------
+                # Remove failed task
+                # ----------------------------------------------
+
                 pending.remove(
                     task
                 )
 
-                # Step 72 will replace this
-                # task with dynamically generated
-                # replacement tasks.
+                # ----------------------------------------------
+                # Add replacement tasks
+                # ----------------------------------------------
+
+                pending.extend(
+                    replacement_tasks
+                )
+
+                print(
+                    "\n[Replanner] Added",
+                    len(replacement_tasks),
+                    "replacement tasks."
+                )
 
                 continue
 
@@ -919,14 +899,6 @@ class TaskExecutor:
                 pending.remove(
                     task
                 )
-
-                # Step 71 capability matching
-                # prepares the architecture for
-                # automatic handoff.
-                #
-                # Step 72 will connect the selected
-                # alternative agent back into the
-                # task graph.
 
                 continue
 
@@ -956,7 +928,7 @@ class TaskExecutor:
                 continue
 
             # ====================================================
-            # RECOVERY → FAIL
+            # PERMANENT FAILURE
             # ====================================================
 
             print(
@@ -977,9 +949,7 @@ class TaskExecutor:
         # ========================================================
 
         final_decision = (
-
             self.supervisor.decide(
-
                 pending
             )
         )
@@ -1027,40 +997,30 @@ class TaskExecutor:
         task
     ):
         """
-        Resolve the correct agent for a task.
+        Resolve the correct agent.
 
         Priority:
 
-        1. If task already specifies an agent,
-           use it.
-
-        2. If no agent is specified but required
-           capabilities exist, use CapabilityMatcher.
-
-        3. If neither exists, return an error.
+        1. Explicit task.agent
+        2. Required capabilities
+        3. Capability matcher
         """
 
         # --------------------------------------------------------
-        # Existing explicit agent
+        # Explicit agent
         # --------------------------------------------------------
 
         existing_agent = getattr(
-
             task,
-
             "agent",
-
             None
         )
 
         if existing_agent:
 
             return {
-
                 "success": True,
-
-                "agent":
-                    existing_agent
+                "agent": existing_agent
             }
 
         # --------------------------------------------------------
@@ -1068,58 +1028,47 @@ class TaskExecutor:
         # --------------------------------------------------------
 
         required_capabilities = getattr(
-
             task,
-
             "required_capabilities",
-
             []
         )
 
         if not required_capabilities:
 
             return {
-
                 "success": False,
-
                 "agent": None,
-
                 "error": (
                     f"Task {task.id} "
-                    "does not specify an agent "
-                    "or required capabilities."
+                    "has no agent and no "
+                    "required capabilities."
                 )
             }
 
         # --------------------------------------------------------
-        # Capability matcher unavailable
+        # Matcher unavailable
         # --------------------------------------------------------
 
         if self.capability_matcher is None:
 
             return {
-
                 "success": False,
-
                 "agent": None,
-
                 "error": (
-                    "CapabilityMatcher is not "
-                    "configured."
+                    "CapabilityMatcher "
+                    "is not configured."
                 )
             }
 
         # --------------------------------------------------------
-        # Find best agent
+        # Match
         # --------------------------------------------------------
 
         try:
 
             agent = (
-
                 self.capability_matcher
                 .find_best_agent(
-
                     required_capabilities
                 )
             )
@@ -1127,34 +1076,26 @@ class TaskExecutor:
         except Exception as error:
 
             return {
-
                 "success": False,
-
                 "agent": None,
-
                 "error": (
-                    "Capability matching failed: "
-                    f"{error}"
+                    "Capability matching "
+                    f"failed: {error}"
                 )
             }
 
         # --------------------------------------------------------
-        # No agent found
+        # No match
         # --------------------------------------------------------
 
         if agent is None:
 
             return {
-
                 "success": False,
-
                 "agent": None,
-
                 "error": (
-
-                    "No available agent has "
-                    "the required capabilities: "
-
+                    "No available agent "
+                    "supports: "
                     + ", ".join(
                         required_capabilities
                     )
@@ -1162,43 +1103,235 @@ class TaskExecutor:
             }
 
         # --------------------------------------------------------
-        # Return selected agent
+        # Agent name
         # --------------------------------------------------------
 
         agent_name = getattr(
-
             agent,
-
             "name",
-
             None
         )
 
         if not agent_name:
 
             return {
-
                 "success": False,
-
                 "agent": None,
-
                 "error": (
-                    "Capability matcher "
-                    "returned an invalid "
-                    "agent."
+                    "CapabilityMatcher "
+                    "returned an invalid agent."
                 )
             }
 
         return {
-
             "success": True,
-
-            "agent":
-                agent_name
+            "agent": agent_name
         }
 
     # ============================================================
-    # FAILURE RECOVERY
+    # MEMORY ATTACHMENT
+    # ============================================================
+
+    def _attach_memory(
+        self,
+        task
+    ):
+        """
+        Attach a SharedMemory interface to the task.
+
+        The actual Agent should use this interface
+        when executing the task.
+        """
+
+        if self.memory_manager is None:
+
+            return
+
+        agent_id = getattr(
+            task,
+            "agent",
+            None
+        )
+
+        if not agent_id:
+
+            return
+
+        try:
+
+            from memory.shared import (
+                SharedMemory
+            )
+
+            task.memory = SharedMemory(
+                self.memory_manager,
+                agent_id
+            )
+
+            print(
+                "[Memory] Shared memory "
+                f"attached to {agent_id}"
+            )
+
+        except ImportError:
+
+            print(
+                "[Memory] SharedMemory "
+                "module unavailable."
+            )
+
+    # ============================================================
+    # STORE RESULT IN MEMORY
+    # ============================================================
+
+    def _store_result_memory(
+        self,
+        task,
+        result
+    ):
+        """
+        Store a lightweight task result
+        in shared memory.
+
+        Do not store raw credentials,
+        secrets, or sensitive data here.
+        """
+
+        if self.memory_manager is None:
+
+            return
+
+        agent_id = getattr(
+            task,
+            "agent",
+            None
+        )
+
+        if not agent_id:
+
+            return
+
+        try:
+
+            self.memory_manager.remember(
+
+                key=f"task.{task.id}.result",
+
+                value={
+                    "status": "completed",
+                    "task": task.description
+                },
+
+                agent_id=agent_id,
+
+                memory_type="result",
+
+                importance=5,
+
+                metadata={
+                    "task_id": task.id
+                }
+            )
+
+            print(
+                "[Memory] Task result stored."
+            )
+
+        except Exception as error:
+
+            print(
+                "[Memory] Could not store result:",
+                error
+            )
+
+    # ============================================================
+    # DYNAMIC REPLANNING
+    # ============================================================
+
+    def _dynamic_replan(
+        self,
+        task,
+        error
+    ):
+        """
+        Ask the Supervisor/Replanner to generate
+        replacement tasks.
+        """
+
+        try:
+
+            graph = (
+                self.supervisor.replan_task(
+                    task,
+                    error
+                )
+            )
+
+            if graph is None:
+
+                return []
+
+            replacement_tasks = list(
+                graph.tasks.values()
+            )
+
+            for replacement in (
+                replacement_tasks
+            ):
+
+                print(
+                    "\n[Replanner] New task:"
+                )
+
+                print(
+                    "  ID:",
+                    replacement.id
+                )
+
+                print(
+                    "  Description:",
+                    replacement.description
+                )
+
+                print(
+                    "  Action:",
+                    replacement.action
+                )
+
+                print(
+                    "  Capabilities:",
+                    getattr(
+                        replacement,
+                        "required_capabilities",
+                        []
+                    )
+                )
+
+                print(
+                    "  Dependencies:",
+                    getattr(
+                        replacement,
+                        "depends_on",
+                        []
+                    )
+                )
+
+            return replacement_tasks
+
+        except Exception as error:
+
+            print(
+                "\n[Replanner] Failed:"
+            )
+
+            print(
+                str(error)
+            )
+
+            return []
+
+    # ============================================================
+    # RECOVERY
     # ============================================================
 
     def _recover_task(
@@ -1207,16 +1340,15 @@ class TaskExecutor:
         error
     ):
         """
-        Send a failed task to RecoveryManager.
+        Call RecoveryManager.
 
-        Supports both the new RecoveryManager API
-        and older implementations.
+        Supports both the current API and
+        older versions.
         """
 
         try:
 
             return (
-
                 self.recovery.handle_failure(
 
                     task_id=task.id,
@@ -1229,11 +1361,7 @@ class TaskExecutor:
 
         except TypeError:
 
-            # Backwards compatibility with
-            # older RecoveryManager.
-
             return (
-
                 self.recovery.handle_failure(
 
                     task.id,
@@ -1252,16 +1380,13 @@ class TaskExecutor:
         results
     ):
         """
-        Return True only when all dependencies
+        Return True when all dependencies
         have completed successfully.
         """
 
         dependencies = getattr(
-
             task,
-
             "depends_on",
-
             []
         )
 
@@ -1280,31 +1405,18 @@ class TaskExecutor:
         for dependency_id in dependencies:
 
             dependency_result = (
-
                 results.get(
-
                     dependency_id
                 )
             )
-
-            # ----------------------------------------------------
-            # Dependency hasn't executed.
-            # ----------------------------------------------------
 
             if dependency_result is None:
 
                 return False
 
-            # ----------------------------------------------------
-            # Dependency did not complete.
-            # ----------------------------------------------------
-
             if (
-
                 dependency_result.status
-
                 != "completed"
-
             ):
 
                 return False
@@ -1312,7 +1424,7 @@ class TaskExecutor:
         return True
 
     # ============================================================
-    # CREATE FAILURE RESULT
+    # FAILURE RESULT
     # ============================================================
 
     def _failure_result(
@@ -1321,7 +1433,7 @@ class TaskExecutor:
         error
     ):
         """
-        Create a TaskResult for internal executor failures.
+        Create a failure result for executor-level errors.
         """
 
         try:
