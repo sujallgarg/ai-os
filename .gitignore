@@ -1,3 +1,9 @@
+# Dependencies & Next.js build
+node_modules/
+.next/
+out/
+.turbo/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -10,8 +16,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -30,6 +34,7 @@ ENV/
 .env
 .env.*
 *.env
+!.env.example
 
 # Google OAuth & Credentials
 token.json
