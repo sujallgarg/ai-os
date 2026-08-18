@@ -16,27 +16,37 @@ from supervisor.monitor import (
 from supervisor.models import (
     SupervisorDecision
 )
-
+from planner.replanner import (
+    DynamicReplanner
+)
 
 class SupervisorAgent:
 
-    def __init__(
-        self,
-        planner=None,
-        recovery_manager=None
-    ):
+ def __init__(
+    self,
+    planner=None,
+    recovery_manager=None,
+    replanner=None
+):
 
-        self.planner = planner
+    self.planner = planner
 
-        self.recovery = (
-            recovery_manager
+    self.recovery = (
+        recovery_manager
+    )
+
+    self.replanner = (
+        replanner
+        or DynamicReplanner(
+            planner=planner
         )
+    )
 
-        self.monitor = (
-            SupervisorMonitor()
-        )
+    self.monitor = (
+        SupervisorMonitor()
+    )
 
-        self.state = None
+    self.state = None
 
     # ============================================================
     # START PLAN
@@ -217,3 +227,41 @@ class SupervisorAgent:
             return None
 
         return self.state.snapshot()
+    
+    def replan_task(
+        self,
+        task,
+        error
+    ):
+
+        if not self.replanner:
+
+            raise RuntimeError(
+
+                "Replanner is not configured."
+            )
+
+        completed_tasks = []
+
+        if self.state:
+
+         completed_tasks = [
+
+            task_id
+
+            for task_id, result
+            in self.state.results.items()
+
+            if result.get(
+                "status"
+            ) == "completed"
+        ]
+
+        return self.replanner.replan(
+
+            original_task=task,
+
+        error=error,
+
+        completed_tasks=completed_tasks
+    )

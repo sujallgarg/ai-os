@@ -60,3 +60,111 @@ class ParallelExecutor:
                 )
 
         return results
+        # ====================================================
+# RECOVERY → REPLAN
+# ====================================================
+
+        if recovery.action == "REPLAN":
+
+            print(
+                "\n↻ Dynamic replanning required."
+            )
+
+    # ------------------------------------------------
+    # Ask Supervisor/Replanner for new tasks
+    # ------------------------------------------------
+
+        try:
+
+            new_graph = (
+                self.supervisor.replan_task(
+
+                    task,
+
+                error
+            )
+        )
+
+        except Exception as replan_error:
+
+            print(
+                "\n[Replanner] Failed:"
+            )
+
+        print(
+            replan_error
+        )
+
+        results[
+            task.id
+        ] = result
+
+        pending.remove(
+            task
+        )
+
+                            
+
+    # ------------------------------------------------
+    # Remove failed task
+    # ------------------------------------------------
+
+        results[
+            task.id
+        ] = result
+
+        pending.remove(
+            task
+    )
+
+    # ------------------------------------------------
+    # Add replacement tasks
+    # ------------------------------------------------
+
+        replacement_tasks = list(
+            new_graph.tasks.values()
+        )
+
+        print(
+            "\n[Replanner] Generated "
+        f"{len(replacement_tasks)} "
+        "replacement tasks."
+    )
+
+    # ------------------------------------------------
+    # Add replacement tasks to queue
+    # ------------------------------------------------
+
+        for replacement_task in (
+            replacement_tasks
+        ):
+
+             print(
+                 "\nNew task:"
+             )
+
+             print(
+                 "  ID:",
+            replacement_task.id
+        )
+
+        print(
+                "  Description:",
+                replacement_task.description
+            )
+
+        print(
+                "  Action:",
+                replacement_task.action
+            )
+
+        print(
+                "  Capabilities:",
+                replacement_task.required_capabilities
+            )
+
+        pending.append(
+                replacement_task
+            )
+
+        
