@@ -26,4 +26,6 @@ class ExecutionTask:
         default_factory=list
     )
 
+    tool_name: str | None = None
+
     status: str = "pending"

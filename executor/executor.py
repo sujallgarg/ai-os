@@ -87,7 +87,8 @@ class TaskExecutor:
         timeout_manager=None,
         supervisor=None,
         capability_matcher=None,
-        memory_manager=None
+        memory_manager=None,
+        permission_resolver=None
     ):
         """
         Initialize the central executor.
@@ -117,6 +118,9 @@ class TaskExecutor:
 
         memory_manager:
             Shared memory available to agents.
+
+        permission_resolver:
+            Resolves tool execution permissions.
         """
 
         # ========================================================
@@ -180,6 +184,14 @@ class TaskExecutor:
 
         self.memory_manager = (
             memory_manager
+        )
+
+        # ========================================================
+        # PERMISSION RESOLVER
+        # ========================================================
+
+        self.permission_resolver = (
+            permission_resolver
         )
 
     # ============================================================
@@ -1479,3 +1491,86 @@ class TaskExecutor:
 
                 error
             )
+    
+
+    def _check_tool_permission(
+        self,
+        task
+    ):
+        """
+        Check whether the task's requested tool
+        is allowed to execute.
+        """
+
+        if self.permission_resolver is None:
+
+            # Safe default:
+            # don't allow unknown external actions.
+
+            return {
+                "allowed": False,
+                "requires_approval": False,
+                "reason": (
+                    "PermissionResolver "
+                    "is not configured."
+                )
+            }
+
+        tool_name = getattr(
+            task,
+            "tool_name",
+            None
+        )
+
+        if not tool_name:
+
+            return {
+                "allowed": True,
+                "requires_approval": False,
+                "reason": (
+                    "Task does not directly "
+                    "specify an external tool."
+                )
+            }
+
+        from permissions.models import (
+            ToolRequest
+        )
+
+        request = ToolRequest(
+            agent_id=task.agent,
+            tool_name=tool_name,
+            action=getattr(
+                task,
+                "action",
+                ""
+            ),
+            parameters=getattr(
+                task,
+                "parameters",
+                {}
+            )
+        )
+
+        result = (
+            self.permission_resolver.resolve(
+                request
+            )
+        )
+
+        return {
+            "allowed": (
+                result.decision.value
+                == "ALLOW"
+            ),
+
+            "requires_approval": (
+                result.requires_approval
+            ),
+
+            "reason":
+                result.reason,
+
+            "decision":
+                result.decision.value
+        }
