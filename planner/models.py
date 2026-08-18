@@ -8,7 +8,7 @@ class ExecutionTask:
 
     description: str
 
-    agent: str
+    agent: str | None
 
     action: str
 
@@ -20,18 +20,10 @@ class ExecutionTask:
         default_factory=list
     )
 
-    status: str = "pending"
-
     priority: int = 5
 
-
-@dataclass
-class PlanResult:
-
-    goal: str
-
-    tasks: list[ExecutionTask]
-
-    metadata: dict = field(
-        default_factory=dict
+    required_capabilities: list[str] = field(
+        default_factory=list
     )
+
+    status: str = "pending"
