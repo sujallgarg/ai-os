@@ -43,6 +43,13 @@ from typing import Any, Callable, Iterable
 
 from executor.result import ExecutionResult
 from executor.task_running import TaskRunner
+from events.models import (
+    SystemEvent
+)
+
+from events.manager import (
+    event_manager
+)
 
 
 logger = logging.getLogger(__name__)
@@ -271,6 +278,21 @@ class Executor:
                     : self.max_parallel_tasks
                 ]
             )
+
+            for task in current_batch:
+                task_id = self._task_id(task)
+                await self._report_progress(
+                    job_id=job_id,
+                    progress=self._calculate_progress(
+                        completed_count,
+                        total_tasks,
+                    ),
+                    event="task.started",
+                    metadata={
+                        "task_id": task_id,
+                        "description": getattr(task, "description", ""),
+                    },
+                )
 
             logger.info(
                 "Executing %s ready tasks",
@@ -902,6 +924,80 @@ class Executor:
                 goal=goal,
             )
         )
+async def _report_progress(
+    self,
+    job_id,
+    progress,
+    event,
+    metadata
+):
 
+    payload = {
+        "event": event,
+        "job_id": job_id,
+        "progress": progress,
+        "metadata": metadata,
+    }
+
+    # Existing JobManager update
+    if (
+        self.job_manager
+        and job_id
+        and progress is not None
+    ):
+
+        self.job_manager.update_progress(
+            job_id,
+            progress
+        )
+
+    # ------------------------------------------------------------
+    # REAL-TIME EVENT
+    # ------------------------------------------------------------
+
+    user_id = (
+        metadata.get(
+            "user_id"
+        )
+        if metadata
+        else None
+    )
+
+    if user_id:
+
+        await event_manager.publish(
+
+            SystemEvent(
+
+                event=event,
+
+                job_id=job_id,
+
+                task_id=metadata.get(
+                    "task_id"
+                ),
+
+                agent_id=metadata.get(
+                    "agent_id"
+                ),
+
+                data=metadata
+            ),
+
+            user_id=user_id
+        )
+
+    # Existing callback
+    if self.progress_callback:
+
+        result = self.progress_callback(
+            payload
+        )
+
+        if inspect.isawaitable(
+            result
+        ):
+
+            await result
 
 TaskExecutor = Executor

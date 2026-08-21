@@ -15,14 +15,16 @@ interface Job {
 export default function JobDetailPage({
   params
 }: {
-  params: Promise<{ id: string }>
+  params: Promise<{ id: string }> | { id: string }
 }) {
   const [job, setJob] = useState<Job | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
 
   useEffect(() => {
-    params.then(({ id }) => {
-      setJobId(id);
+    Promise.resolve(params).then((p) => {
+      if (p?.id) {
+        setJobId(p.id);
+      }
     });
   }, [params]);
 

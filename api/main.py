@@ -16,6 +16,12 @@ from api.routes import jobs
 from api.routes import approvals
 from api.routes import agents
 from api.routes import tasks
+from api.routes.events import (
+    router as events_router
+)
+app.include_router(
+    events_router
+)
 
 
 app = FastAPI(
