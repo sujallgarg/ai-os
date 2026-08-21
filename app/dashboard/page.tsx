@@ -6,6 +6,7 @@ import Topbar from "@/components/Topbar";
 import StatCard from "@/components/StatCard";
 import GoalCard from "@/components/GoalCard";
 import ApprovalCard from "@/components/ApprovalCard";
+import LiveActivity from "@/components/LiveActivity";
 import { useRealtime } from "@/hooks/useRealtime";
 
 import {
@@ -246,6 +247,9 @@ export default function DashboardPage() {
           </section>
         </main>
       </div>
+
+      {/* Floating Live AI Activity Window */}
+      <LiveActivity />
     </div>
   );
 }

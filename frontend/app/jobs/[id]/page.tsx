@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getJob } from "@/lib/api";
+import LiveActivity from "@/components/LiveActivity";
 
 interface Job {
   id: string;
@@ -115,6 +116,9 @@ export default function JobDetailPage({
           )}
         </div>
       </div>
+
+      {/* Floating Live AI Activity Window */}
+      <LiveActivity jobId={jobId || undefined} />
     </main>
   );
 }
