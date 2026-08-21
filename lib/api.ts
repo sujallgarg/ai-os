@@ -900,14 +900,14 @@ export class AIOSClient {
     if (goalIndex === -1) return undefined;
 
     const goal = goals[goalIndex];
-    const taskIndex = goal.tasks.findIndex((t) => t.id === taskId);
+    const taskIndex = goal.tasks.findIndex((t: ExecutionTask) => t.id === taskId);
     if (taskIndex === -1) return undefined;
 
     goal.tasks[taskIndex] = { ...goal.tasks[taskIndex], ...updates };
 
     // Recompute goal metrics
-    const completed = goal.tasks.filter((t) => t.status === "completed").length;
-    const failed = goal.tasks.filter((t) => t.status === "failed").length;
+    const completed = goal.tasks.filter((t: ExecutionTask) => t.status === "completed").length;
+    const failed = goal.tasks.filter((t: ExecutionTask) => t.status === "failed").length;
     goal.completed_tasks = completed;
     goal.failed_tasks = failed;
     goal.pending_tasks = goal.total_tasks - completed - failed;
@@ -1172,4 +1172,22 @@ export const createGoal = (goal: string) => AIOSClient.createGoal(goal);
 export const getJob = (id: string) => AIOSClient.getJob(id);
 export const approveRequest = (id: string) => AIOSClient.approveRequest(id);
 export const rejectRequest = (id: string) => AIOSClient.rejectRequest(id);
+
+export const executeEmailAgent = async (payload: Record<string, any>) => {
+  try {
+    const res = await fetch(`http://localhost:8000/agents/email/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to execute Email Agent: ${res.statusText}`);
+    }
+    return await res.json();
+  } catch (error) {
+    console.error("executeEmailAgent error:", error);
+    return { status: "error", error: String(error) };
+  }
+};
+
 

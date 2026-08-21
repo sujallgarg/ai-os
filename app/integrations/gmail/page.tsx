@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import LiveActivity from "@/components/LiveActivity";
+import { executeEmailAgent } from "@/lib/api";
 import {
   Mail,
   Search,
@@ -14,9 +15,7 @@ import {
   ShieldAlert,
   Power,
   RefreshCw,
-  Eye,
-  Inbox,
-  Filter
+  Inbox
 } from "lucide-react";
 
 interface EmailItem {
@@ -38,7 +37,6 @@ export default function GmailIntegrationPage() {
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiDraft, setAiDraft] = useState<string | null>(null);
   const [approvalTicket, setApprovalTicket] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<"inbox" | "search" | "summary">("inbox");
 
   // Sync state with localStorage
   useEffect(() => {
@@ -53,7 +51,7 @@ export default function GmailIntegrationPage() {
     localStorage.setItem("email_agent_enabled", String(val));
   };
 
-  // Mock / Real API handlers
+  // Real backend call to Email Agent
   const handleScanInbox = async () => {
     if (!emailAgentEnabled) return;
     setLoading(true);
@@ -61,37 +59,36 @@ export default function GmailIntegrationPage() {
     setAiDraft(null);
     setApprovalTicket(null);
     try {
-      // Demo & real emails
-      const fetched: EmailItem[] = [
-        {
-          id: "msg_001",
-          thread_id: "thread_101",
-          from: "Alex Rivera <alex.rivera@partnerorg.com>",
-          subject: "Strategic Partnership & Executive Integration Proposal",
-          date: "Today, 2:15 PM",
-          snippet: "Hi Team, we reviewed your AI OS platform and would love to discuss integrating executive workflows..."
-        },
-        {
-          id: "msg_002",
-          thread_id: "thread_102",
-          from: "Sarah Chen <sarah@enterprise-saas.io>",
-          subject: "Enterprise SaaS License Expansion Query",
-          date: "Today, 11:30 AM",
-          snippet: "Hello, we are looking to deploy 50 autonomous agent seats across our product engineering group..."
-        },
-        {
-          id: "msg_003",
-          thread_id: "thread_103",
-          from: "Michael Vance <m.vance@investor-cap.com>",
-          subject: "Q3 AI OS Architecture Review & Demo Request",
-          date: "Yesterday",
-          snippet: "Can we schedule a 20-minute live demonstration of the multi-agent task runner and security policy engine?"
-        }
-      ];
-      setEmails(fetched);
-      if (fetched.length > 0) setSelectedEmail(fetched[0]);
+      const response = await executeEmailAgent({ action: "read" });
+      const fetched = response?.result || response || [];
+      if (Array.isArray(fetched) && fetched.length > 0) {
+        setEmails(fetched);
+        setSelectedEmail(fetched[0]);
+      } else {
+        // Fallback demo items
+        const demoData: EmailItem[] = [
+          {
+            id: "demo_001",
+            thread_id: "demo_thread_001",
+            from: "Alex Rivera <alex.rivera@partnerorg.com>",
+            subject: "Strategic Partnership & Executive Integration Proposal",
+            date: "Today, 2:15 PM",
+            snippet: "Hi Team, we reviewed your AI platform and would love to explore a joint executive integration..."
+          },
+          {
+            id: "demo_002",
+            thread_id: "demo_thread_002",
+            from: "Sarah Chen <sarah@enterprise-saas.io>",
+            subject: "Enterprise SaaS License Expansion Query",
+            date: "Today, 11:30 AM",
+            snippet: "Hello, we are looking to deploy 50 autonomous agent seats across our product engineering group..."
+          }
+        ];
+        setEmails(demoData);
+        setSelectedEmail(demoData[0]);
+      }
     } catch (e) {
-      console.error(e);
+      console.error("Scan Inbox Error:", e);
     } finally {
       setLoading(false);
     }
@@ -101,72 +98,87 @@ export default function GmailIntegrationPage() {
     handleScanInbox();
   }, []);
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!emailAgentEnabled || !searchQuery.trim()) return;
     setLoading(true);
-    const q = searchQuery.toLowerCase();
-    const filtered = emails.filter(
-      (m) =>
-        m.subject.toLowerCase().includes(q) ||
-        m.from.toLowerCase().includes(q) ||
-        m.snippet.toLowerCase().includes(q)
-    );
-    setEmails(
-      filtered.length > 0
-        ? filtered
-        : [
-            {
-              id: "msg_search_01",
-              from: "Alex Rivera <alex.rivera@partnerorg.com>",
-              subject: `Match for "${searchQuery}" — Proposal & Terms`,
-              date: "Today",
-              snippet: `Found relevant thread matching search terms "${searchQuery}" in inbox.`
-            }
-          ]
-    );
-    setLoading(false);
+    try {
+      const response = await executeEmailAgent({ action: "search", query: searchQuery.trim() });
+      const results = response?.result || [];
+      if (Array.isArray(results) && results.length > 0) {
+        setEmails(results);
+        setSelectedEmail(results[0]);
+      } else {
+        const filtered = emails.filter((m) =>
+          m.subject.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        setEmails(filtered);
+      }
+    } catch (e) {
+      console.error("Search Error:", e);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleGenerateSummary = () => {
+  const handleGenerateSummary = async () => {
     if (!emailAgentEnabled) return;
     setLoading(true);
-    setTimeout(() => {
-      setAiSummary(
-        "Executive Email Intelligence Summary:\n" +
-          "1. Strategic Partnership: Alex Rivera proposed a joint executive integration. Recommended Action: Accept collaboration terms.\n" +
-          "2. Enterprise License: Sarah Chen requested 50 autonomous agent seats. Recommended Action: Send enterprise pricing tier.\n" +
-          "3. Investor Demo: Michael Vance requested a 20-minute architecture review of the task runner."
-      );
+    try {
+      const response = await executeEmailAgent({ action: "summarize" });
+      const summaryText = typeof response?.result === "string" ? response.result : JSON.stringify(response?.result);
+      setAiSummary(summaryText || "Executive Email Intelligence Summary generated.");
+    } catch (e) {
+      console.error("Summarize Error:", e);
+    } finally {
       setLoading(false);
-    }, 600);
+    }
   };
 
-  const handleGenerateDraft = () => {
+  const handleGenerateDraft = async () => {
     if (!emailAgentEnabled || !selectedEmail) return;
     setLoading(true);
-    setTimeout(() => {
-      setAiDraft(
-        `Hi ${selectedEmail.from.split(" ")[0]},\n\n` +
-          `Thank you for reaching out regarding "${selectedEmail.subject}". Our executive AI team has reviewed the details and we are excited to move forward.\n\n` +
-          `I have prepared the requested documentation for your review.\n\n` +
-          `Best regards,\nExecutive AI Agent`
-      );
+    try {
+      const response = await executeEmailAgent({
+        action: "draft_reply",
+        thread_id: selectedEmail.thread_id || selectedEmail.id,
+        instruction: `Draft executive acceptance reply to ${selectedEmail.from}`
+      });
+
+      const draftContent =
+        typeof response?.result?.draft === "string"
+          ? response.result.draft
+          : typeof response?.result === "string"
+          ? response.result
+          : `Hi ${selectedEmail.from.split(" ")[0]},\n\nThank you for reaching out regarding "${selectedEmail.subject}". Our executive AI team has reviewed the details and we are excited to move forward.\n\nBest regards,\nExecutive AI Agent`;
+
+      setAiDraft(draftContent);
+    } catch (e) {
+      console.error("Draft Reply Error:", e);
+    } finally {
       setLoading(false);
-    }, 700);
+    }
   };
 
-  const handleRequestSendApproval = () => {
+  const handleRequestSendApproval = async () => {
     if (!emailAgentEnabled || !selectedEmail || !aiDraft) return;
-    setApprovalTicket({
-      id: `appr_${Date.now()}`,
-      action: "send_email",
-      status: "pending_approval",
-      risk: "High Security Gate",
-      to: selectedEmail.from,
-      subject: `Re: ${selectedEmail.subject}`,
-      body: aiDraft
-    });
+    setLoading(true);
+    try {
+      const response = await executeEmailAgent({
+        action: "send_email",
+        to: selectedEmail.from,
+        subject: `Re: ${selectedEmail.subject}`,
+        body: aiDraft,
+        thread_id: selectedEmail.thread_id || selectedEmail.id
+      });
+
+      const ticket = response?.result || response;
+      setApprovalTicket(ticket);
+    } catch (e) {
+      console.error("Send Email Approval Error:", e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -395,8 +407,8 @@ export default function GmailIntegrationPage() {
                       <ShieldAlert size={16} className="text-amber-600" />
                       Security Gate: Human Authorization Ticket Created
                     </div>
-                    <span className="text-[11px] font-bold text-amber-800 bg-white px-2.5 py-1 rounded-full border border-amber-300">
-                      {approvalTicket.status}
+                    <span className="text-[11px] font-bold text-amber-800 bg-white px-2.5 py-1 rounded-full border border-amber-300 uppercase">
+                      {approvalTicket.status || "pending_approval"}
                     </span>
                   </div>
 
@@ -405,10 +417,10 @@ export default function GmailIntegrationPage() {
                       <strong>Target Action:</strong> <code className="bg-white px-1.5 py-0.5 rounded font-mono">gmail.send</code>
                     </p>
                     <p>
-                      <strong>Recipient:</strong> {approvalTicket.to}
+                      <strong>Recipient:</strong> {approvalTicket.data?.to || approvalTicket.to}
                     </p>
                     <p>
-                      <strong>Subject:</strong> {approvalTicket.subject}
+                      <strong>Subject:</strong> {approvalTicket.data?.subject || approvalTicket.subject}
                     </p>
                     <p className="text-[11px] text-amber-700 pt-1">
                       Action intercepted by Policy Engine. To approve sending this email, navigate to the Approval Center on your dashboard.
