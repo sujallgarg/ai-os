@@ -1,86 +1,64 @@
 """
-Central Task Executor.
+executor/executor.py
 
-Responsibilities
-----------------
+Main execution engine for the autonomous AI platform.
 
-1. Dependency-aware execution
-2. Priority-aware execution
-3. Timeout-aware execution through TaskRunner
-4. Retry handling
-5. Exponential backoff
-6. Failure recovery
-7. Dynamic agent capability matching
-8. Supervisor monitoring
-9. Dynamic task replanning
-10. Agent handoff support
-11. Human intervention support
-12. Shared agent memory
-13. Execution result tracking
+Responsibilities:
+    1. Receive a task graph / task list.
+    2. Resolve task dependencies.
+    3. Identify tasks that are ready to execute.
+    4. Execute independent tasks concurrently.
+    5. Route tasks to appropriate agents.
+    6. Route tool calls through the ToolExecutor.
+    7. Collect execution results.
+    8. Detect blocked/deadlocked tasks.
+    9. Report progress.
+    10. Return a complete execution result.
 
+Important:
 
-Architecture
-------------
+The Executor does NOT bypass the permission system.
 
-                USER GOAL
-                    |
-                    v
-                  PLANNER
-                    |
-                    v
-                TASK GRAPH
-                    |
-                    v
-           CAPABILITY MATCHER
-                    |
-                    v
-               SUPERVISOR
-                    |
-                    v
-                EXECUTOR
-                    |
-                    v
-               TASK RUNNER
-                    |
-                    v
-                  AGENT
-                    |
-             +------+------+
-             |             |
-             v             v
-           TOOL         MEMORY
-             |             |
-             +------+------+
-                    |
-                    v
-                 RESULT
-                    |
-          +---------+---------+
-          |         |         |
-        SUCCESS   RETRY    RECOVERY
-                              |
-                   +----------+----------+
-                   |          |          |
-                 REPLAN    HANDOFF     USER
+The intended flow is:
+
+    Task
+      ↓
+    Executor
+      ↓
+    TaskRunner
+      ↓
+    ToolExecutor
+      ↓
+    PermissionResolver
+      ↓
+    ALLOW / ASK_USER / DENY
 """
 
+from __future__ import annotations
 
+import asyncio
+import inspect
+import logging
+from typing import Any, Callable, Iterable
+
+from executor.result import ExecutionResult
 from executor.task_running import TaskRunner
 
-from recovery.manager import RecoveryManager
 
-from priority.manager import PriorityManager
-
-from retry.manager import RetryManager
-
-from supervisor.supervisor import SupervisorAgent
+logger = logging.getLogger(__name__)
 
 
-class TaskExecutor:
+class Executor:
+    """
+    Main task execution engine.
+
+    The executor works with a DAG-like task structure where each
+    task can depend on one or more previous tasks.
+    """
 
     def __init__(
         self,
-        agent_manager,
+        agent_manager=None,
         log_service=None,
         recovery_manager=None,
         retry_manager=None,
@@ -88,1333 +66,550 @@ class TaskExecutor:
         supervisor=None,
         capability_matcher=None,
         memory_manager=None,
-        permission_resolver=None
+        permission_resolver=None,
+        tool_executor=None,
+        approval_manager=None,
+        job_manager=None,
+        progress_callback: Callable[
+            [dict[str, Any]], Any
+        ] | None = None,
+        max_parallel_tasks: int = 5,
     ):
-        """
-        Initialize the central executor.
+        self.agent_manager = agent_manager
 
-        Parameters
-        ----------
-        agent_manager:
-            Manages available agents.
+        self.log_service = log_service
 
-        log_service:
-            Records execution logs.
-
-        recovery_manager:
-            Handles failures after retries.
-
-        retry_manager:
-            Controls retry decisions.
-
-        timeout_manager:
-            Controls execution timeouts.
-
-        supervisor:
-            Monitors the complete execution plan.
-
-        capability_matcher:
-            Dynamically selects agents.
-
-        memory_manager:
-            Shared memory available to agents.
-
-        permission_resolver:
-            Resolves tool execution permissions.
-        """
-
-        # ========================================================
-        # TASK RUNNER
-        # ========================================================
-
-        self.runner = TaskRunner(
-            agent_manager=agent_manager,
-            log_service=log_service,
-            timeout_manager=timeout_manager
-        )
-
-        # ========================================================
-        # RECOVERY MANAGER
-        # ========================================================
-
-        self.recovery = (
+        self.recovery_manager = (
             recovery_manager
-            or RecoveryManager()
         )
 
-        # ========================================================
-        # PRIORITY MANAGER
-        # ========================================================
+        self.retry_manager = retry_manager
 
-        self.priority_manager = (
-            PriorityManager()
+        self.timeout_manager = (
+            timeout_manager
         )
 
-        # ========================================================
-        # RETRY MANAGER
-        # ========================================================
-
-        self.retry_manager = (
-            retry_manager
-            or RetryManager()
-        )
-
-        # ========================================================
-        # SUPERVISOR
-        # ========================================================
-
-        self.supervisor = (
-            supervisor
-            or SupervisorAgent(
-                recovery_manager=self.recovery
-            )
-        )
-
-        # ========================================================
-        # CAPABILITY MATCHER
-        # ========================================================
+        self.supervisor = supervisor
 
         self.capability_matcher = (
             capability_matcher
         )
 
-        # ========================================================
-        # SHARED MEMORY
-        # ========================================================
-
         self.memory_manager = (
             memory_manager
         )
-
-        # ========================================================
-        # PERMISSION RESOLVER
-        # ========================================================
 
         self.permission_resolver = (
             permission_resolver
         )
 
+        self.tool_executor = (
+            tool_executor
+        )
+
+        self.approval_manager = (
+            approval_manager
+        )
+
+        self.job_manager = (
+            job_manager
+        )
+
+        self.progress_callback = (
+            progress_callback
+        )
+
+        self.max_parallel_tasks = max(
+            1,
+            max_parallel_tasks
+        )
+
+        self.task_runner = TaskRunner(
+            agent_manager=(
+                self.agent_manager
+            ),
+            capability_matcher=(
+                self.capability_matcher
+            ),
+            tool_executor=(
+                self.tool_executor
+            ),
+        )
+
     # ============================================================
-    # MAIN EXECUTION METHOD
+    # PUBLIC API
     # ============================================================
 
-    def execute(
+    async def execute_task_graph(
         self,
-        tasks,
-        user_id="system",
-        goal=None
-    ):
+        tasks: Iterable[Any],
+        context: dict[str, Any] | None = None,
+        job_id: str | None = None,
+        goal: str | None = None,
+    ) -> dict[int, ExecutionResult]:
         """
-        Execute the supplied task list.
+        Execute a complete task graph.
 
-        Tasks are processed according to:
+        Tasks are executed only when all dependencies have
+        completed successfully.
 
-            1. Dependencies
-            2. Priority
-            3. Agent capability
-            4. Supervisor state
-            5. Task execution
-            6. Retry
-            7. Recovery
-            8. Replanning
+        Independent tasks may run concurrently.
         """
 
-        # ========================================================
-        # VALIDATION
-        # ========================================================
+        context = dict(
+            context or {}
+        )
 
-        if tasks is None:
-            raise ValueError(
-                "tasks cannot be None."
-            )
+        if job_id is not None:
+            context["job_id"] = job_id
 
-        tasks = list(tasks)
+        if goal is not None:
+            context["goal"] = goal
 
-        if not tasks:
-            print(
-                "[Executor] No tasks to execute."
-            )
+        task_list = list(tasks)
 
+        if not task_list:
             return {}
 
-        # ========================================================
-        # RESULT STORAGE
-        # ========================================================
+        pending: dict[int, Any] = {
+            self._task_id(task): task
+            for task in task_list
+        }
 
-        results = {}
+        results: dict[
+            int,
+            ExecutionResult
+        ] = {}
 
-        # ========================================================
-        # PENDING TASK QUEUE
-        # ========================================================
-
-        pending = list(tasks)
-
-        # ========================================================
-        # SUPERVISOR START
-        # ========================================================
-
-        supervisor_goal = (
-            goal
-            or f"Execute {len(tasks)} tasks"
+        total_tasks = len(
+            pending
         )
 
-        self.supervisor.start(
-            goal=supervisor_goal,
-            tasks=tasks
+        completed_count = 0
+
+        logger.info(
+            "Starting task graph with %s tasks",
+            total_tasks,
         )
 
-        # ========================================================
-        # EXECUTION HEADER
-        # ========================================================
-
-        print(
-            "\n"
-            + "=" * 70
+        await self._report_progress(
+            job_id=job_id,
+            progress=0,
+            event="execution.started",
+            metadata={
+                "total_tasks": total_tasks
+            },
         )
-
-        print(
-            "AI TASK EXECUTOR"
-        )
-
-        print(
-            "=" * 70
-        )
-
-        print(
-            "Goal:",
-            supervisor_goal
-        )
-
-        print(
-            "Tasks:",
-            len(tasks)
-        )
-
-        # ========================================================
-        # MAIN EXECUTION LOOP
-        # ========================================================
 
         while pending:
 
-            print(
-                "\n"
-                + "-" * 70
-            )
-
-            print(
-                "EXECUTOR LOOP"
-            )
-
-            print(
-                "-" * 70
-            )
-
-            print(
-                "Pending:",
-                len(pending)
-            )
-
-            print(
-                "Processed:",
-                len(results)
-            )
-
-            # ====================================================
-            # FIND READY TASKS
-            # ====================================================
-
-            ready_tasks = [
-
-                task
-
-                for task in pending
-
-                if self._dependencies_completed(
-                    task,
-                    results
+            ready_tasks = (
+                self._get_ready_tasks(
+                    pending=list(
+                        pending.values()
+                    ),
+                    results=results,
                 )
-            ]
+            )
 
-            # ====================================================
-            # NO READY TASK
-            # ====================================================
+            # ----------------------------------------------------
+            # DEADLOCK / BLOCKED TASK DETECTION
+            # ----------------------------------------------------
 
             if not ready_tasks:
 
-                print(
-                    "\n[Executor] No ready tasks."
+                logger.error(
+                    "No executable tasks remain, "
+                    "but %s pending tasks exist.",
+                    len(pending),
                 )
 
-                print(
-                    "Possible causes:"
-                )
+                for task in pending.values():
 
-                print(
-                    "  - unresolved dependency"
-                )
-
-                print(
-                    "  - circular dependency"
-                )
-
-                print(
-                    "  - failed dependency"
-                )
-
-                decision = (
-                    self.supervisor.decide(
-                        pending
-                    )
-                )
-
-                print(
-                    "\n[Supervisor]"
-                )
-
-                print(
-                    "Action:",
-                    decision.action
-                )
-
-                print(
-                    "Reason:",
-                    decision.reason
-                )
-
-                raise RuntimeError(
-                    "No executable tasks available."
-                )
-
-            # ====================================================
-            # PRIORITY SORT
-            # ====================================================
-
-            ready_tasks = (
-                self.priority_manager.sort(
-                    ready_tasks
-                )
-            )
-
-            # ====================================================
-            # SELECT TASK
-            # ====================================================
-
-            task = ready_tasks[0]
-
-            print(
-                "\nSelected task:"
-            )
-
-            print(
-                "  ID:",
-                task.id
-            )
-
-            print(
-                "  Description:",
-                task.description
-            )
-
-            print(
-                "  Action:",
-                task.action
-            )
-
-            print(
-                "  Priority:",
-                getattr(
-                    task,
-                    "priority",
-                    5
-                )
-            )
-
-            print(
-                "  Dependencies:",
-                getattr(
-                    task,
-                    "depends_on",
-                    []
-                )
-            )
-
-            print(
-                "  Agent:",
-                getattr(
-                    task,
-                    "agent",
-                    None
-                )
-            )
-
-            print(
-                "  Required capabilities:",
-                getattr(
-                    task,
-                    "required_capabilities",
-                    []
-                )
-            )
-
-            # ====================================================
-            # RESOLVE AGENT
-            # ====================================================
-
-            agent_selection = (
-                self._resolve_agent(task)
-            )
-
-            if not agent_selection["success"]:
-
-                error = (
-                    agent_selection["error"]
-                )
-
-                print(
-                    "\n[Capability Matcher] "
-                    "Could not resolve agent."
-                )
-
-                print(
-                    "Reason:",
-                    error
-                )
-
-                self.supervisor.task_failed(
-                    task.id,
-                    error
-                )
-
-                recovery = (
-                    self._recover_task(
-                        task,
-                        error
-                    )
-                )
-
-                if recovery.action == "RETRY":
-
-                    print(
-                        "\n↻ Retrying agent resolution."
+                    task_id = (
+                        self._task_id(task)
                     )
 
-                    retry_decision = (
-                        self.retry_manager.decide(
-                            task_id=task.id,
-                            error=error
+                    results[task_id] = (
+                        ExecutionResult(
+                            task_id=task_id,
+                            status="blocked",
+                            error=(
+                                "Task dependencies "
+                                "cannot be satisfied."
+                            ),
+                            metadata={
+                                "reason": (
+                                    "dependency_deadlock"
+                                )
+                            },
                         )
                     )
 
-                    if retry_decision.should_retry:
-
-                        self.retry_manager.wait(
-                            retry_decision
+                await self._report_progress(
+                    job_id=job_id,
+                    progress=self._calculate_progress(
+                        completed_count,
+                        total_tasks,
+                    ),
+                    event="execution.blocked",
+                    metadata={
+                        "remaining_tasks": len(
+                            pending
                         )
+                    },
+                )
 
-                    continue
+                break
 
-                if recovery.action == "REPLAN":
+            # ----------------------------------------------------
+            # LIMIT CONCURRENT TASKS
+            # ----------------------------------------------------
 
-                    print(
-                        "\n↻ Agent resolution "
-                        "requires replanning."
+            current_batch = (
+                ready_tasks[
+                    : self.max_parallel_tasks
+                ]
+            )
+
+            logger.info(
+                "Executing %s ready tasks",
+                len(current_batch),
+            )
+
+            # ----------------------------------------------------
+            # EXECUTE READY TASKS CONCURRENTLY
+            # ----------------------------------------------------
+
+            batch_results = await asyncio.gather(
+
+                *[
+                    self._execute_single_task(
+                        task=task,
+                        context=context,
                     )
+                    for task in current_batch
+                ],
 
-                    replacement_tasks = (
-                        self._dynamic_replan(
-                            task,
-                            error
-                        )
-                    )
-
-                    results[
-                        task.id
-                    ] = self._failure_result(
-                        task,
-                        error
-                    )
-
-                    pending.remove(task)
-
-                    pending.extend(
-                        replacement_tasks
-                    )
-
-                    continue
-
-                if recovery.action == "HANDOFF":
-
-                    print(
-                        "\n→ Agent handoff required."
-                    )
-
-                    results[
-                        task.id
-                    ] = self._failure_result(
-                        task,
-                        error
-                    )
-
-                    pending.remove(task)
-
-                    continue
-
-                if recovery.action == "ASK_USER":
-
-                    print(
-                        "\n⚠ User intervention required."
-                    )
-
-                    results[
-                        task.id
-                    ] = self._failure_result(
-                        task,
-                        error
-                    )
-
-                    pending.remove(task)
-
-                    continue
-
-                results[
-                    task.id
-                ] = self._failure_result(
-                    task,
-                    error
-                )
-
-                pending.remove(task)
-
-                continue
-
-            # ====================================================
-            # ASSIGN SELECTED AGENT
-            # ====================================================
-
-            selected_agent = (
-                agent_selection["agent"]
+                return_exceptions=False,
             )
 
-            if selected_agent:
+            # ----------------------------------------------------
+            # STORE RESULTS
+            # ----------------------------------------------------
 
-                task.agent = selected_agent
+            for task, result in zip(
+                current_batch,
+                batch_results,
+            ):
 
-                print(
-                    "\n[Capability Matcher]"
+                task_id = (
+                    self._task_id(task)
                 )
 
-                print(
-                    "Selected agent:",
-                    selected_agent
+                results[task_id] = result
+
+                pending.pop(
+                    task_id,
+                    None,
                 )
 
-            # ====================================================
-            # ATTACH SHARED MEMORY
-            # ====================================================
+                if result.status == "completed":
 
-            self._attach_memory(
-                task
-            )
+                    completed_count += 1
 
-            # ====================================================
-            # SUPERVISOR: TASK STARTED
-            # ====================================================
+            # ----------------------------------------------------
+            # UPDATE PROGRESS
+            # ----------------------------------------------------
 
-            self.supervisor.task_started(
-                task.id
-            )
-
-            # ====================================================
-            # EXECUTE TASK
-            # ====================================================
-
-            try:
-
-                result = self.runner.run(
-                    task,
-                    user_id=user_id
-                )
-
-            except Exception as error:
-
-                print(
-                    "\n[Executor] "
-                    "Unexpected exception:"
-                )
-
-                print(
-                    str(error)
-                )
-
-                result = (
-                    self._failure_result(
-                        task,
-                        str(error)
-                    )
-                )
-
-            # ====================================================
-            # SUCCESS
-            # ====================================================
-
-            if result.status == "completed":
-
-                print(
-                    f"\n✓ Task {task.id} completed."
-                )
-
-                # ----------------------------------------------
-                # Supervisor
-                # ----------------------------------------------
-
-                self.supervisor.task_completed(
-                    task.id,
-                    result
-                )
-
-                # ----------------------------------------------
-                # Store result
-                # ----------------------------------------------
-
-                results[
-                    task.id
-                ] = result
-
-                # ----------------------------------------------
-                # Store useful result in memory
-                # ----------------------------------------------
-
-                self._store_result_memory(
-                    task,
-                    result
-                )
-
-                # ----------------------------------------------
-                # Remove task
-                # ----------------------------------------------
-
-                pending.remove(
-                    task
-                )
-
-                # ----------------------------------------------
-                # Reset retry counter
-                # ----------------------------------------------
-
-                self.retry_manager.reset(
-                    task.id
-                )
-
-                continue
-
-            # ====================================================
-            # FAILURE
-            # ====================================================
-
-            error = (
-                result.error
-                or "Unknown execution error."
-            )
-
-            print(
-                f"\n✗ Task {task.id} failed."
-            )
-
-            print(
-                "Error:",
-                error
-            )
-
-            # ====================================================
-            # SUPERVISOR FAILURE
-            # ====================================================
-
-            self.supervisor.task_failed(
-                task.id,
-                error
-            )
-
-            # ====================================================
-            # RETRY DECISION
-            # ====================================================
-
-            retry_decision = (
-                self.retry_manager.decide(
-                    task_id=task.id,
-                    error=error
+            progress = (
+                self._calculate_progress(
+                    completed_count,
+                    total_tasks,
                 )
             )
 
-            print(
-                "\nRetry decision:"
+            await self._report_progress(
+                job_id=job_id,
+                progress=progress,
+                event="execution.progress",
+                metadata={
+                    "completed_tasks":
+                        completed_count,
+
+                    "total_tasks":
+                        total_tasks,
+
+                    "remaining_tasks":
+                        len(pending),
+                },
             )
 
-            print(
-                "  Retry:",
-                retry_decision.should_retry
+            # ----------------------------------------------------
+            # STOP IF A TASK REQUIRES APPROVAL
+            # ----------------------------------------------------
+
+            waiting_for_approval = any(
+
+                result.status
+                == "waiting_approval"
+
+                for result
+                in batch_results
             )
 
-            print(
-                "  Attempt:",
-                retry_decision.attempt
-            )
+            if waiting_for_approval:
 
-            print(
-                "  Error type:",
-                retry_decision.error_type
-            )
-
-            print(
-                "  Delay:",
-                retry_decision.delay
-            )
-
-            print(
-                "  Reason:",
-                retry_decision.reason
-            )
-
-            # ====================================================
-            # RETRY
-            # ====================================================
-
-            if retry_decision.should_retry:
-
-                print(
-                    f"\n↻ Retrying task {task.id}..."
+                logger.info(
+                    "Execution paused because "
+                    "approval is required."
                 )
 
-                self.retry_manager.wait(
-                    retry_decision
+                await self._report_progress(
+                    job_id=job_id,
+                    progress=progress,
+                    event="execution.waiting_approval",
+                    metadata={},
                 )
 
-                continue
+                break
 
-            # ====================================================
-            # RECOVERY
-            # ====================================================
+            # ----------------------------------------------------
+            # FAILURE HANDLING
+            # ----------------------------------------------------
 
-            print(
-                "\n[Executor]"
+            permanent_failure = any(
+
+                result.status == "failed"
+
+                for result
+                in batch_results
             )
 
-            print(
-                "Retry attempts exhausted."
-            )
+            if permanent_failure:
 
-            print(
-                "Starting recovery..."
-            )
-
-            recovery = (
-                self._recover_task(
-                    task,
-                    error
-                )
-            )
-
-            print(
-                "\nRecovery decision:"
-            )
-
-            print(
-                "  Action:",
-                recovery.action
-            )
-
-            print(
-                "  Reason:",
-                recovery.reason
-            )
-
-            print(
-                "  Retry count:",
-                recovery.retry_count
-            )
-
-            # ====================================================
-            # RECOVERY → RETRY
-            # ====================================================
-
-            if recovery.action == "RETRY":
-
-                print(
-                    f"\n↻ Recovery requested "
-                    f"retry for task {task.id}."
+                logger.warning(
+                    "One or more tasks failed."
                 )
 
-                continue
+                # Do not automatically abort every
+                # independent task here.
+                #
+                # Dependent tasks will remain blocked
+                # because their dependency did not complete.
 
-            # ====================================================
-            # RECOVERY → REPLAN
-            # ====================================================
+        # --------------------------------------------------------
+        # FINAL STATUS
+        # --------------------------------------------------------
 
-            if recovery.action == "REPLAN":
+        await self._report_progress(
+            job_id=job_id,
+            progress=self._calculate_progress(
+                completed_count,
+                total_tasks,
+            ),
+            event="execution.finished",
+            metadata={
+                "completed_tasks":
+                    completed_count,
 
-                print(
-                    "\n↻ Dynamic replanning required."
-                )
+                "total_tasks":
+                    total_tasks,
 
-                replacement_tasks = (
-                    self._dynamic_replan(
-                        task,
-                        error
-                    )
-                )
-
-                # ----------------------------------------------
-                # Save failed result
-                # ----------------------------------------------
-
-                results[
-                    task.id
-                ] = result
-
-                # ----------------------------------------------
-                # Remove failed task
-                # ----------------------------------------------
-
-                pending.remove(
-                    task
-                )
-
-                # ----------------------------------------------
-                # Add replacement tasks
-                # ----------------------------------------------
-
-                pending.extend(
-                    replacement_tasks
-                )
-
-                print(
-                    "\n[Replanner] Added",
-                    len(replacement_tasks),
-                    "replacement tasks."
-                )
-
-                continue
-
-            # ====================================================
-            # RECOVERY → HANDOFF
-            # ====================================================
-
-            if recovery.action == "HANDOFF":
-
-                print(
-                    "\n→ Agent handoff required."
-                )
-
-                results[
-                    task.id
-                ] = result
-
-                pending.remove(
-                    task
-                )
-
-                continue
-
-            # ====================================================
-            # RECOVERY → ASK USER
-            # ====================================================
-
-            if recovery.action == "ASK_USER":
-
-                print(
-                    "\n⚠ User intervention required."
-                )
-
-                print(
-                    "Task:",
-                    task.description
-                )
-
-                results[
-                    task.id
-                ] = result
-
-                pending.remove(
-                    task
-                )
-
-                continue
-
-            # ====================================================
-            # PERMANENT FAILURE
-            # ====================================================
-
-            print(
-                f"\n✗ Task {task.id} "
-                "failed permanently."
-            )
-
-            results[
-                task.id
-            ] = result
-
-            pending.remove(
-                task
-            )
-
-        # ========================================================
-        # FINAL SUPERVISOR CHECK
-        # ========================================================
-
-        final_decision = (
-            self.supervisor.decide(
-                pending
-            )
+                "remaining_tasks":
+                    len(pending),
+            },
         )
 
-        print(
-            "\n"
-            + "=" * 70
+        logger.info(
+            "Task graph execution finished."
         )
-
-        print(
-            "EXECUTION FINISHED"
-        )
-
-        print(
-            "=" * 70
-        )
-
-        print(
-            "Supervisor action:",
-            final_decision.action
-        )
-
-        print(
-            "Supervisor reason:",
-            final_decision.reason
-        )
-
-        print(
-            "Processed tasks:",
-            len(results)
-        )
-
-        # ========================================================
-        # RETURN RESULTS
-        # ========================================================
 
         return results
 
     # ============================================================
-    # AGENT RESOLUTION
+    # SINGLE TASK
     # ============================================================
 
-    def _resolve_agent(
+    async def _execute_single_task(
         self,
-        task
-    ):
+        task: Any,
+        context: dict[str, Any],
+    ) -> ExecutionResult:
         """
-        Resolve the correct agent.
+        Execute one task through TaskRunner.
 
-        Priority:
-
-        1. Explicit task.agent
-        2. Required capabilities
-        3. Capability matcher
+        This method is intentionally small because TaskRunner
+        owns the actual agent/tool execution.
         """
 
-        # --------------------------------------------------------
-        # Explicit agent
-        # --------------------------------------------------------
-
-        existing_agent = getattr(
-            task,
-            "agent",
-            None
+        task_id = (
+            self._task_id(task)
         )
 
-        if existing_agent:
-
-            return {
-                "success": True,
-                "agent": existing_agent
-            }
-
-        # --------------------------------------------------------
-        # Required capabilities
-        # --------------------------------------------------------
-
-        required_capabilities = getattr(
-            task,
-            "required_capabilities",
-            []
+        logger.info(
+            "Starting task %s",
+            task_id,
         )
 
-        if not required_capabilities:
+        await self._report_progress(
+            job_id=context.get(
+                "job_id"
+            ),
+            progress=None,
+            event="task.started",
+            metadata={
+                "task_id": task_id,
 
-            return {
-                "success": False,
-                "agent": None,
-                "error": (
-                    f"Task {task.id} "
-                    "has no agent and no "
-                    "required capabilities."
-                )
-            }
+                "description":
+                    getattr(
+                        task,
+                        "description",
+                        "",
+                    ),
 
-        # --------------------------------------------------------
-        # Matcher unavailable
-        # --------------------------------------------------------
+                "agent":
+                    getattr(
+                        task,
+                        "agent",
+                        None,
+                    ),
 
-        if self.capability_matcher is None:
-
-            return {
-                "success": False,
-                "agent": None,
-                "error": (
-                    "CapabilityMatcher "
-                    "is not configured."
-                )
-            }
-
-        # --------------------------------------------------------
-        # Match
-        # --------------------------------------------------------
+                "tool":
+                    getattr(
+                        task,
+                        "tool_name",
+                        None,
+                    ),
+            },
+        )
 
         try:
 
-            agent = (
-                self.capability_matcher
-                .find_best_agent(
-                    required_capabilities
-                )
+            result = await self.task_runner.run(
+                task=task,
+                context=context,
             )
 
-        except Exception as error:
-
-            return {
-                "success": False,
-                "agent": None,
-                "error": (
-                    "Capability matching "
-                    f"failed: {error}"
-                )
-            }
-
-        # --------------------------------------------------------
-        # No match
-        # --------------------------------------------------------
-
-        if agent is None:
-
-            return {
-                "success": False,
-                "agent": None,
-                "error": (
-                    "No available agent "
-                    "supports: "
-                    + ", ".join(
-                        required_capabilities
-                    )
-                )
-            }
-
-        # --------------------------------------------------------
-        # Agent name
-        # --------------------------------------------------------
-
-        agent_name = getattr(
-            agent,
-            "name",
-            None
-        )
-
-        if not agent_name:
-
-            return {
-                "success": False,
-                "agent": None,
-                "error": (
-                    "CapabilityMatcher "
-                    "returned an invalid agent."
-                )
-            }
-
-        return {
-            "success": True,
-            "agent": agent_name
-        }
-
-    # ============================================================
-    # MEMORY ATTACHMENT
-    # ============================================================
-
-    def _attach_memory(
-        self,
-        task
-    ):
-        """
-        Attach a SharedMemory interface to the task.
-
-        The actual Agent should use this interface
-        when executing the task.
-        """
-
-        if self.memory_manager is None:
-
-            return
-
-        agent_id = getattr(
-            task,
-            "agent",
-            None
-        )
-
-        if not agent_id:
-
-            return
-
-        try:
-
-            from memory.shared import (
-                SharedMemory
-            )
-
-            task.memory = SharedMemory(
-                self.memory_manager,
-                agent_id
-            )
-
-            print(
-                "[Memory] Shared memory "
-                f"attached to {agent_id}"
-            )
-
-        except ImportError:
-
-            print(
-                "[Memory] SharedMemory "
-                "module unavailable."
-            )
-
-    # ============================================================
-    # STORE RESULT IN MEMORY
-    # ============================================================
-
-    def _store_result_memory(
-        self,
-        task,
-        result
-    ):
-        """
-        Store a lightweight task result
-        in shared memory.
-
-        Do not store raw credentials,
-        secrets, or sensitive data here.
-        """
-
-        if self.memory_manager is None:
-
-            return
-
-        agent_id = getattr(
-            task,
-            "agent",
-            None
-        )
-
-        if not agent_id:
-
-            return
-
-        try:
-
-            self.memory_manager.remember(
-
-                key=f"task.{task.id}.result",
-
-                value={
-                    "status": "completed",
-                    "task": task.description
-                },
-
-                agent_id=agent_id,
-
-                memory_type="result",
-
-                importance=5,
-
-                metadata={
-                    "task_id": task.id
-                }
-            )
-
-            print(
-                "[Memory] Task result stored."
-            )
-
-        except Exception as error:
-
-            print(
-                "[Memory] Could not store result:",
-                error
-            )
-
-    # ============================================================
-    # DYNAMIC REPLANNING
-    # ============================================================
-
-    def _dynamic_replan(
-        self,
-        task,
-        error
-    ):
-        """
-        Ask the Supervisor/Replanner to generate
-        replacement tasks.
-        """
-
-        try:
-
-            graph = (
-                self.supervisor.replan_task(
-                    task,
-                    error
-                )
-            )
-
-            if graph is None:
-
-                return []
-
-            replacement_tasks = list(
-                graph.tasks.values()
-            )
-
-            for replacement in (
-                replacement_tasks
+            if not isinstance(
+                result,
+                ExecutionResult,
             ):
 
-                print(
-                    "\n[Replanner] New task:"
+                result = ExecutionResult(
+
+                    task_id=task_id,
+
+                    status="completed",
+
+                    output=result,
                 )
 
-                print(
-                    "  ID:",
-                    replacement.id
-                )
+            await self._report_progress(
+                job_id=context.get(
+                    "job_id"
+                ),
+                progress=None,
+                event=(
+                    "task."
+                    f"{result.status}"
+                ),
+                metadata={
+                    "task_id": task_id,
+                    "error": result.error,
+                },
+            )
 
-                print(
-                    "  Description:",
-                    replacement.description
-                )
+            return result
 
-                print(
-                    "  Action:",
-                    replacement.action
-                )
+        except asyncio.CancelledError:
 
-                print(
-                    "  Capabilities:",
-                    getattr(
-                        replacement,
-                        "required_capabilities",
-                        []
-                    )
-                )
+            logger.warning(
+                "Task %s was cancelled.",
+                task_id,
+            )
 
-                print(
-                    "  Dependencies:",
-                    getattr(
-                        replacement,
-                        "depends_on",
-                        []
-                    )
-                )
+            return ExecutionResult(
 
-            return replacement_tasks
+                task_id=task_id,
+
+                status="cancelled",
+
+                error="Task was cancelled.",
+            )
 
         except Exception as error:
 
-            print(
-                "\n[Replanner] Failed:"
+            logger.exception(
+                "Task %s failed.",
+                task_id,
             )
 
-            print(
-                str(error)
-            )
-
-            return []
-
-    # ============================================================
-    # RECOVERY
-    # ============================================================
-
-    def _recover_task(
-        self,
-        task,
-        error
-    ):
-        """
-        Call RecoveryManager.
-
-        Supports both the current API and
-        older versions.
-        """
-
-        try:
-
-            return (
-                self.recovery.handle_failure(
-
-                    task_id=task.id,
-
-                    error=error,
-
-                    task=task
+            recovered = await (
+                self._attempt_recovery(
+                    task,
+                    error,
+                    context,
                 )
             )
 
-        except TypeError:
+            if recovered is not None:
 
-            return (
-                self.recovery.handle_failure(
+                return recovered
 
-                    task.id,
+            return ExecutionResult(
 
-                    error
-                )
+                task_id=task_id,
+
+                status="failed",
+
+                error=str(error),
             )
 
     # ============================================================
-    # DEPENDENCY CHECK
+    # DEPENDENCY RESOLUTION
     # ============================================================
 
     def _dependencies_completed(
         self,
-        task,
-        results
-    ):
+        task: Any,
+        results: dict[
+            int,
+            ExecutionResult
+        ],
+    ) -> bool:
         """
-        Return True when all dependencies
-        have completed successfully.
+        Return True only if every dependency has completed.
+
+        A dependency that is:
+            failed
+            blocked
+            waiting_approval
+            cancelled
+
+        is NOT considered completed.
         """
 
         dependencies = getattr(
             task,
             "depends_on",
-            []
+            None,
         )
 
-        # --------------------------------------------------------
-        # No dependencies
-        # --------------------------------------------------------
+        if dependencies is None:
 
-        if not dependencies:
+            # Support older task models that may use
+            # "dependencies".
 
-            return True
+            dependencies = getattr(
+                task,
+                "dependencies",
+                [],
+            )
 
-        # --------------------------------------------------------
-        # Check dependencies
-        # --------------------------------------------------------
-
-        for dependency_id in dependencies:
+        for dependency_id in (
+            dependencies or []
+        ):
 
             dependency_result = (
                 results.get(
@@ -1436,141 +631,277 @@ class TaskExecutor:
         return True
 
     # ============================================================
-    # FAILURE RESULT
+    # READY TASKS
     # ============================================================
 
-    def _failure_result(
+    def _get_ready_tasks(
         self,
-        task,
-        error
-    ):
+        pending: Iterable[Any],
+        results: dict[
+            int,
+            ExecutionResult
+        ],
+    ) -> list[Any]:
         """
-        Create a failure result for executor-level errors.
+        Return tasks whose dependencies are complete.
         """
+
+        ready_tasks = [
+
+            task
+
+            for task in pending
+
+            if self._dependencies_completed(
+                task,
+                results,
+            )
+        ]
+
+        return ready_tasks
+
+    # ============================================================
+    # TASK ID
+    # ============================================================
+
+    @staticmethod
+    def _task_id(
+        task: Any
+    ) -> int:
+        """
+        Extract a stable task ID.
+        """
+
+        task_id = getattr(
+            task,
+            "id",
+            None,
+        )
+
+        if task_id is None:
+
+            raise ValueError(
+                "Every task must have an id."
+            )
+
+        return int(
+            task_id
+        )
+
+    # ============================================================
+    # PROGRESS
+    # ============================================================
+
+    @staticmethod
+    def _calculate_progress(
+        completed: int,
+        total: int,
+    ) -> float:
+        """
+        Calculate percentage progress.
+        """
+
+        if total <= 0:
+
+            return 100.0
+
+        return round(
+            (
+                completed
+                / total
+            )
+            * 100,
+            2,
+        )
+
+    # ============================================================
+    # PROGRESS EVENT
+    # ============================================================
+
+    async def _report_progress(
+        self,
+        job_id: str | None,
+        progress: float | None,
+        event: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """
+        Report execution events.
+
+        Supports:
+            - JobManager
+            - custom callback
+            - future WebSocket/SSE event system
+        """
+
+        payload = {
+
+            "event": event,
+
+            "job_id": job_id,
+
+            "progress": progress,
+
+            "metadata": metadata,
+        }
+
+        # --------------------------------------------------------
+        # JOB MANAGER
+        # --------------------------------------------------------
+
+        if (
+            self.job_manager
+            and job_id
+            and progress is not None
+        ):
+
+            try:
+
+                self.job_manager.update_progress(
+                    job_id,
+                    progress,
+                )
+
+            except Exception:
+
+                logger.exception(
+                    "Failed to update job progress."
+                )
+
+        # --------------------------------------------------------
+        # CUSTOM EVENT CALLBACK
+        # --------------------------------------------------------
+
+        if self.progress_callback:
+
+            try:
+
+                callback_result = (
+                    self.progress_callback(
+                        payload
+                    )
+                )
+
+                if inspect.isawaitable(
+                    callback_result
+                ):
+
+                    await callback_result
+
+            except Exception:
+
+                logger.exception(
+                    "Progress callback failed."
+                )
+
+    # ============================================================
+    # RECOVERY
+    # ============================================================
+
+    async def _attempt_recovery(
+        self,
+        task: Any,
+        error: Exception,
+        context: dict[str, Any],
+    ) -> ExecutionResult | None:
+        """
+        Give the configured recovery system an opportunity
+        to recover from an execution failure.
+
+        Returns:
+            ExecutionResult if recovery succeeded.
+            None if no recovery was possible.
+        """
+
+        if self.recovery_manager is None:
+
+            return None
 
         try:
 
-            from executor.result import (
-                TaskResult
+            recovery_method = getattr(
+                self.recovery_manager,
+                "recover",
+                None,
             )
 
-            return TaskResult(
+            if recovery_method is None:
 
-                task_id=task.id,
+                return None
 
-                status="failed",
+            result = recovery_method(
 
-                error=error
+                task=task,
+
+                error=error,
+
+                context=context,
             )
 
-        except ImportError:
+            if inspect.isawaitable(
+                result
+            ):
 
-            class FailureResult:
+                result = await result
 
-                def __init__(
-                    self,
-                    task_id,
-                    error
-                ):
+            if result is None:
 
-                    self.task_id = (
-                        task_id
-                    )
+                return None
 
-                    self.status = (
-                        "failed"
-                    )
+            if isinstance(
+                result,
+                ExecutionResult,
+            ):
 
-                    self.error = (
-                        error
-                    )
+                return result
 
-            return FailureResult(
+            return ExecutionResult(
 
-                task.id,
+                task_id=self._task_id(
+                    task
+                ),
 
-                error
+                status="completed",
+
+                output=result,
+
+                metadata={
+                    "recovered": True
+                },
             )
-    
 
-    def _check_tool_permission(
+        except Exception:
+
+            logger.exception(
+                "Recovery attempt failed."
+            )
+
+            return None
+
+    # ============================================================
+    # SYNCHRONOUS COMPATIBILITY WRAPPER
+    # ============================================================
+
+    def execute_sync(
         self,
-        task
-    ):
+        tasks: Iterable[Any],
+        context: dict[str, Any] | None = None,
+        job_id: str | None = None,
+        goal: str | None = None,
+    ) -> dict[int, ExecutionResult]:
         """
-        Check whether the task's requested tool
-        is allowed to execute.
+        Synchronous wrapper for environments that are not
+        already running an asyncio event loop.
         """
 
-        if self.permission_resolver is None:
-
-            # Safe default:
-            # don't allow unknown external actions.
-
-            return {
-                "allowed": False,
-                "requires_approval": False,
-                "reason": (
-                    "PermissionResolver "
-                    "is not configured."
-                )
-            }
-
-        tool_name = getattr(
-            task,
-            "tool_name",
-            None
-        )
-
-        if not tool_name:
-
-            return {
-                "allowed": True,
-                "requires_approval": False,
-                "reason": (
-                    "Task does not directly "
-                    "specify an external tool."
-                )
-            }
-
-        from permissions.models import (
-            ToolRequest
-        )
-
-        request = ToolRequest(
-            agent_id=task.agent,
-            tool_name=tool_name,
-            action=getattr(
-                task,
-                "action",
-                ""
-            ),
-            parameters=getattr(
-                task,
-                "parameters",
-                {}
+        return asyncio.run(
+            self.execute_task_graph(
+                tasks=tasks,
+                context=context,
+                job_id=job_id,
+                goal=goal,
             )
         )
 
-        result = (
-            self.permission_resolver.resolve(
-                request
-            )
-        )
 
-        return {
-            "allowed": (
-                result.decision.value
-                == "ALLOW"
-            ),
-
-            "requires_approval": (
-                result.requires_approval
-            ),
-
-            "reason":
-                result.reason,
-
-            "decision":
-                result.decision.value
-        }
+TaskExecutor = Executor

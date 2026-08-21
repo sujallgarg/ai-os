@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { AIOSClient } from "@/lib/api";
+import { Goal, ApprovalRequest } from "@/lib/types";
 import {
   LayoutDashboard,
   Target,
@@ -28,11 +29,11 @@ export function Sidebar() {
   useEffect(() => {
     const updateCounts = () => {
       const approvals = AIOSClient.getApprovals();
-      const pending = approvals.filter((a) => a.status === "pending").length;
+      const pending = approvals.filter((a: ApprovalRequest) => a.status === "pending").length;
       setPendingApprovalsCount(pending);
 
       const goals = AIOSClient.getGoals();
-      const active = goals.filter((g) => g.status === "in_progress").length;
+      const active = goals.filter((g: Goal) => g.status === "in_progress").length;
       setActiveGoalsCount(active);
     };
 

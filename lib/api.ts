@@ -1164,3 +1164,12 @@ export class AIOSClient {
     };
   }
 }
+
+export const getAgents = () => AIOSClient.getAgents();
+export const getApprovals = () => AIOSClient.getApprovals();
+export const getJobs = () => AIOSClient.getJobs();
+export const createGoal = (goal: string) => AIOSClient.createGoal(goal);
+export const getJob = (id: string) => AIOSClient.getJob(id);
+export const approveRequest = (id: string) => AIOSClient.approveRequest(id);
+export const rejectRequest = (id: string) => AIOSClient.rejectRequest(id);
+

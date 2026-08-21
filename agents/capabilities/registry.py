@@ -99,3 +99,13 @@ class CapabilityRegistry:
             capability
             in agent.capabilities
         )
+
+    def exists(
+        self,
+        agent_name
+    ):
+
+        return (
+            agent_name
+            in self.agents
+        )

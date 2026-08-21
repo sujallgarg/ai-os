@@ -16,37 +16,39 @@ from supervisor.monitor import (
 from supervisor.models import (
     SupervisorDecision
 )
+
 from planner.replanner import (
     DynamicReplanner
 )
 
+
 class SupervisorAgent:
 
- def __init__(
-    self,
-    planner=None,
-    recovery_manager=None,
-    replanner=None
-):
+    def __init__(
+        self,
+        planner=None,
+        recovery_manager=None,
+        replanner=None
+    ):
 
-    self.planner = planner
+        self.planner = planner
 
-    self.recovery = (
-        recovery_manager
-    )
-
-    self.replanner = (
-        replanner
-        or DynamicReplanner(
-            planner=planner
+        self.recovery = (
+            recovery_manager
         )
-    )
 
-    self.monitor = (
-        SupervisorMonitor()
-    )
+        self.replanner = (
+            replanner
+            or DynamicReplanner(
+                planner=planner
+            )
+        )
 
-    self.state = None
+        self.monitor = (
+            SupervisorMonitor()
+        )
+
+        self.state = None
 
     # ============================================================
     # START PLAN
@@ -60,9 +62,7 @@ class SupervisorAgent:
 
         self.state = (
             ExecutionStateManager(
-
                 goal=goal,
-
                 total_tasks=len(tasks)
             )
         )
@@ -105,9 +105,7 @@ class SupervisorAgent:
             )
 
         self.state.task_completed(
-
             task_id,
-
             result
         )
 
@@ -128,9 +126,7 @@ class SupervisorAgent:
             )
 
         self.state.task_failed(
-
             task_id,
-
             error
         )
 
@@ -151,9 +147,7 @@ class SupervisorAgent:
 
         inspection = (
             self.monitor.inspect(
-
                 self.state,
-
                 pending_tasks
             )
         )
@@ -173,9 +167,7 @@ class SupervisorAgent:
         if status == "completed":
 
             return SupervisorDecision(
-
                 action="COMPLETE",
-
                 reason=reason
             )
 
@@ -186,9 +178,7 @@ class SupervisorAgent:
         if status == "attention":
 
             return SupervisorDecision(
-
                 action="RECOVER",
-
                 reason=reason
             )
 
@@ -199,9 +189,7 @@ class SupervisorAgent:
         if status == "blocked":
 
             return SupervisorDecision(
-
                 action="REPLAN",
-
                 reason=reason
             )
 
@@ -210,9 +198,7 @@ class SupervisorAgent:
         # --------------------------------
 
         return SupervisorDecision(
-
             action="CONTINUE",
-
             reason=reason
         )
 
@@ -227,7 +213,7 @@ class SupervisorAgent:
             return None
 
         return self.state.snapshot()
-    
+
     def replan_task(
         self,
         task,
@@ -237,7 +223,6 @@ class SupervisorAgent:
         if not self.replanner:
 
             raise RuntimeError(
-
                 "Replanner is not configured."
             )
 
@@ -245,23 +230,17 @@ class SupervisorAgent:
 
         if self.state:
 
-         completed_tasks = [
-
-            task_id
-
-            for task_id, result
-            in self.state.results.items()
-
-            if result.get(
-                "status"
-            ) == "completed"
-        ]
+            completed_tasks = [
+                task_id
+                for task_id, result
+                in self.state.results.items()
+                if result.get(
+                    "status"
+                ) == "completed"
+            ]
 
         return self.replanner.replan(
-
             original_task=task,
-
-        error=error,
-
-        completed_tasks=completed_tasks
-    )
+            error=error,
+            completed_tasks=completed_tasks
+        )

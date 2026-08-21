@@ -69,9 +69,9 @@ export function TaskGraphVisualizer({ goal, onGoalUpdated }: TaskGraphVisualizer
 
       // Also unlock downstream tasks whose dependencies are now fulfilled
       if (updatedGoal) {
-        updatedGoal.tasks.forEach((t) => {
-          if (t.status === "pending" && t.depends_on.every((dId) => {
-            const depTask = updatedGoal.tasks.find((dt) => dt.id === dId);
+        updatedGoal.tasks.forEach((t: ExecutionTask) => {
+          if (t.status === "pending" && t.depends_on.every((dId: number) => {
+            const depTask = updatedGoal.tasks.find((dt: ExecutionTask) => dt.id === dId);
             return depTask?.status === "completed";
           })) {
             AIOSClient.updateGoalTask(goal.id, t.id, { status: "ready" });

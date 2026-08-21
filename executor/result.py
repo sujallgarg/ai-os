@@ -1,13 +1,9 @@
-"""
-Execution result models.
-"""
-
 from dataclasses import dataclass, field
 from typing import Any
 
 
 @dataclass
-class TaskResult:
+class ExecutionResult:
 
     task_id: int
 
@@ -20,3 +16,5 @@ class TaskResult:
     metadata: dict = field(
         default_factory=dict
     )
+
+    approval_id: str | None = None

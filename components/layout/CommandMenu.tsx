@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { AIOSClient } from "@/lib/api";
+import { Goal } from "@/lib/types";
 import {
   Search,
   LayoutDashboard,
@@ -58,7 +59,7 @@ export function CommandMenu({ isOpen, onClose, onOpenGoalModal }: CommandMenuPro
   ];
 
   const goals = AIOSClient.getGoals();
-  const filteredGoals = goals.filter((g) =>
+  const filteredGoals = goals.filter((g: Goal) =>
     g.title.toLowerCase().includes(query.toLowerCase())
   );
 
@@ -118,7 +119,7 @@ export function CommandMenu({ isOpen, onClose, onOpenGoalModal }: CommandMenuPro
               Goals
             </span>
             <div className="space-y-0.5">
-              {filteredGoals.slice(0, 3).map((goal) => (
+              {filteredGoals.slice(0, 3).map((goal: Goal) => (
                 <button
                   key={goal.id}
                   onClick={() => handleSelectGoal(goal.id)}

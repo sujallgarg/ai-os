@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/Button";
 import { AIOSClient } from "@/lib/api";
-import { AgentProfile } from "@/lib/types";
+import { AgentProfile, ApprovalRequest } from "@/lib/types";
 import {
   Search,
   Plus,
@@ -26,7 +26,7 @@ export function Header() {
     const refresh = () => {
       setAgents(AIOSClient.getAgents());
       const approvals = AIOSClient.getApprovals();
-      setPendingApprovals(approvals.filter((a) => a.status === "pending").length);
+      setPendingApprovals(approvals.filter((a: ApprovalRequest) => a.status === "pending").length);
     };
     refresh();
     const interval = setInterval(refresh, 3000);

@@ -9,6 +9,10 @@ from api.dependencies import (
     application
 )
 
+from workers.queue import (
+    job_queue
+)
+
 
 router = APIRouter(
     prefix="/goals",
@@ -20,7 +24,7 @@ router = APIRouter(
     "",
     response_model=GoalResponse
 )
-def create_goal(
+async def create_goal(
     request: GoalRequest
 ):
 
@@ -29,7 +33,16 @@ def create_goal(
     # ============================================================
 
     job = application.job_manager.create(
+
         request.goal
+    )
+
+    # ============================================================
+    # QUEUE JOB
+    # ============================================================
+
+    await job_queue.enqueue(
+        job.id
     )
 
     return GoalResponse(
@@ -38,7 +51,7 @@ def create_goal(
 
         goal=job.goal,
 
-        status=job.status.value
+        status="queued"
     )
 
 

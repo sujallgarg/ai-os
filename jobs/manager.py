@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from jobs.models import (
     Job,
@@ -16,7 +17,6 @@ class JobManager:
         self,
         store=None
     ):
-
         self.store = (
             store
             or JobStore()
@@ -26,13 +26,10 @@ class JobManager:
         self,
         goal
     ):
-
         job = Job(
-
             id=str(
                 uuid.uuid4()
             ),
-
             goal=goal
         )
 
@@ -46,13 +43,11 @@ class JobManager:
         self,
         job_id
     ):
-
         job = self.store.get(
             job_id
         )
 
         if not job:
-
             raise ValueError(
                 "Job not found."
             )
@@ -68,13 +63,11 @@ class JobManager:
         job_id,
         progress
     ):
-
         job = self.store.get(
             job_id
         )
 
         if not job:
-
             raise ValueError(
                 "Job not found."
             )
@@ -89,22 +82,50 @@ class JobManager:
 
         return job
 
+    def wait_for_approval(
+        self,
+        job_id,
+        task_id=None,
+        approval_id=None
+    ):
+        job = self.store.get(
+            job_id
+        )
+
+        if not job:
+            raise ValueError(
+                "Job not found."
+            )
+
+        job.status = (
+            JobStatus.WAITING_FOR_APPROVAL
+        )
+
+        job.current_task_id = task_id
+        job.pending_approval_id = approval_id
+        job.updated_at = datetime.utcnow()
+
+        return job
+
     def complete(
         self,
         job_id,
         result=None
     ):
-
         job = self.store.get(
             job_id
         )
+
+        if not job:
+            raise ValueError(
+                "Job not found."
+            )
 
         job.status = (
             JobStatus.COMPLETED
         )
 
         job.progress = 100
-
         job.result = result
 
         return job
@@ -114,10 +135,14 @@ class JobManager:
         job_id,
         error
     ):
-
         job = self.store.get(
             job_id
         )
+
+        if not job:
+            raise ValueError(
+                "Job not found."
+            )
 
         job.status = (
             JobStatus.FAILED
@@ -131,7 +156,6 @@ class JobManager:
         self,
         job_id
     ):
-
         return self.store.get(
             job_id
         )

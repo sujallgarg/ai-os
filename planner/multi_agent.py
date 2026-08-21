@@ -31,10 +31,20 @@ class MultiAgentPlanner:
     # MAIN PLANNING METHOD
     # ============================================================
 
+    def plan(
+        self,
+        user_goal: str
+    ):
+
+        return self.create_plan(
+            user_goal
+        )
+
     def create_plan(
         self,
         user_goal: str
     ):
+
 
         """
         Convert a natural-language goal into

@@ -1,14 +1,5 @@
-from executor.result import (
-    TaskResult
-)
-
-from timeout.manager import (
-    TimeoutManager
-)
-
-from timeout.executor import (
-    TimeoutExecutor
-)
+import inspect
+from executor.result import ExecutionResult
 
 
 class TaskRunner:
@@ -16,172 +7,124 @@ class TaskRunner:
     def __init__(
         self,
         agent_manager,
-        log_service=None,
-        timeout_manager=None
+        capability_matcher=None,
+        tool_executor=None
     ):
+        self.agent_manager = agent_manager
+        self.capability_matcher = capability_matcher
+        self.tool_executor = tool_executor
 
-        self.agent_manager = (
-            agent_manager
-        )
-
-        self.log_service = (
-            log_service
-        )
-
-        self.timeout_manager = (
-
-            timeout_manager
-
-            or TimeoutManager()
-        )
-
-        self.timeout_executor = (
-            TimeoutExecutor(
-                self.timeout_manager
-            )
-        )
-
-    def run(
+    async def run(
         self,
         task,
-        user_id="system"
+        context=None
     ):
+        print(f"[TaskRunner] Starting task {task.id}")
+        context = context or {}
 
-        print(
-            f"\n[TaskRunner] "
-            f"Starting task {task.id}"
-        )
+        try:
+            # ====================================================
+            # FIND AGENT
+            # ====================================================
+            agent = None
+            task_agent_name = getattr(task, "agent", None)
 
-        log = None
+            if task_agent_name and hasattr(self.agent_manager, "get"):
+                agent = self.agent_manager.get(task_agent_name)
 
-        # --------------------------------
-        # Start execution log
-        # --------------------------------
+            # ====================================================
+            # CAPABILITY MATCHING
+            # ====================================================
+            if agent is None and self.capability_matcher:
+                req_caps = getattr(task, "required_capabilities", [])
+                agent = self.capability_matcher.match(req_caps)
 
-        if self.log_service:
+            if agent is None and task_agent_name:
+                agent = task_agent_name
 
-            log = self.log_service.start(
+            if agent is None:
+                return ExecutionResult(
+                    task_id=task.id,
+                    status="failed",
+                    error="No suitable agent was found."
+                )
 
-                task_id=task.id,
+            agent_name = getattr(agent, "name", str(agent))
 
-                user_id=user_id,
+            # ====================================================
+            # TOOL EXECUTION
+            # ====================================================
+            tool_name = getattr(task, "tool_name", None)
+            if tool_name and self.tool_executor:
+                result = await self.tool_executor.execute(
+                    tool_name=tool_name,
+                    parameters=getattr(task, "parameters", {}),
+                    agent_id=agent_name,
+                    task_id=task.id,
+                    job_id=context.get("job_id"),
+                    context=context
+                )
 
-                agent=task.agent,
+                if isinstance(result, ExecutionResult):
+                    return result
 
-                action=task.action
-            )
+                return ExecutionResult(
+                    task_id=task.id,
+                    status="completed",
+                    output=result,
+                    metadata={"agent": agent_name, "tool": tool_name}
+                )
 
-        # --------------------------------
-        # Actual agent function
-        # --------------------------------
+            # ====================================================
+            # AGENT-ONLY TASK
+            # ====================================================
+            if hasattr(agent, "execute"):
+                res = agent.execute(task=task, context=context)
+                if inspect.isawaitable(res):
+                    res = await res
 
-        def execute_agent():
+                if isinstance(res, ExecutionResult):
+                    return res
 
-            return (
-                self.agent_manager.execute(
+                return ExecutionResult(
+                    task_id=task.id,
+                    status="completed",
+                    output=res,
+                    metadata={"agent": agent_name}
+                )
 
-                    agent_name=task.agent,
-
+            if hasattr(self.agent_manager, "execute"):
+                res = self.agent_manager.execute(
+                    agent_name=agent_name,
                     task={
-
                         "id": task.id,
-
-                        "action":
-                            task.action,
-
-                        "parameters":
-                            task.parameters,
-
-                        "description":
-                            task.description
+                        "action": getattr(task, "action", ""),
+                        "parameters": getattr(task, "parameters", {}),
+                        "description": getattr(task, "description", "")
                     }
                 )
-            )
+                if inspect.isawaitable(res):
+                    res = await res
 
-        # --------------------------------
-        # Execute with timeout
-        # --------------------------------
+                if isinstance(res, ExecutionResult):
+                    return res
 
-        timeout_result, result = (
-
-            self.timeout_executor.run(
-
-                task,
-
-                execute_agent
-            )
-        )
-
-        # --------------------------------
-        # SUCCESS
-        # --------------------------------
-
-        if (
-            timeout_result.status
-            == "completed"
-        ):
-
-            if self.log_service:
-
-                self.log_service.complete(
-
-                    log,
-
-                    output=result
+                return ExecutionResult(
+                    task_id=task.id,
+                    status="completed",
+                    output=res,
+                    metadata={"agent": agent_name}
                 )
 
-            return TaskResult(
-
+            return ExecutionResult(
                 task_id=task.id,
-
-                status="completed",
-
-                output=result
-            )
-
-        # --------------------------------
-        # TIMEOUT
-        # --------------------------------
-
-        if (
-            timeout_result.status
-            == "timeout"
-        ):
-
-            error = (
-                timeout_result.error
-                or "Task timed out."
-            )
-
-            if self.log_service:
-
-                self.log_service.fail(
-
-                    log,
-
-                    error=error
-                )
-
-            return TaskResult(
-
-                task_id=task.id,
-
                 status="failed",
-
-                error=error
+                error="Agent cannot execute this task."
             )
 
-        # --------------------------------
-        # Unexpected result
-        # --------------------------------
-
-        return TaskResult(
-
-            task_id=task.id,
-
-            status="failed",
-
-            error=(
-                "Unknown execution state."
+        except Exception as error:
+            return ExecutionResult(
+                task_id=task.id,
+                status="failed",
+                error=str(error)
             )
-        )

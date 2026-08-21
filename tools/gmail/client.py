@@ -14,15 +14,23 @@ class GmailClient:
         self.service = None
     
     def connect(self):
-        credentials = self.auth.authenticate()
-        self.service = build(
-            "gmail",
-            "v1",
-            credentials = credentials
-        )
-        return self.service
+        try:
+            credentials = self.auth.authenticate()
+            self.service = build(
+                "gmail",
+                "v1",
+                credentials=credentials
+            )
+            return self.service
+        except Exception as error:
+            print(f"[GmailClient] Authentication warning: {error}")
+            return None
+
     def get_service(self):
         if self.service is None:
             return self.connect()
         return self.service
-service = GmailClient().get_service()
+
+
+_client_instance = GmailClient()
+service = None
