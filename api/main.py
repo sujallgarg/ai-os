@@ -2,7 +2,6 @@
 AI Agent Platform API.
 """
 
-
 from fastapi import (
     FastAPI
 )
@@ -11,27 +10,22 @@ from fastapi.middleware.cors import (
     CORSMiddleware
 )
 
-from api.routes import goals
-from api.routes import jobs
-from api.routes import approvals
-from api.routes import agents
-from api.routes import tasks
+from api.routes import (
+    goals,
+    jobs,
+    approvals,
+    agents,
+    tasks
+)
+
 from api.routes.events import (
     router as events_router
-)
-app.include_router(
-    events_router
 )
 
 
 app = FastAPI(
-
     title="AI Agent Platform",
-
-    description=(
-        "Autonomous multi-agent AI system."
-    ),
-
+    description="Autonomous multi-agent AI system.",
     version="1.0.0"
 )
 
@@ -41,18 +35,16 @@ app = FastAPI(
 # ================================================================
 
 app.add_middleware(
-
     CORSMiddleware,
-
     allow_origins=[
-
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "*"
     ],
-
     allow_credentials=True,
-
     allow_methods=["*"],
-
     allow_headers=["*"]
 )
 
@@ -81,35 +73,27 @@ app.include_router(
     tasks.router
 )
 
+app.include_router(
+    events_router
+)
+
 
 # ================================================================
-# HEALTH
+# HEALTH & ROOT
 # ================================================================
 
 @app.get("/")
 def root():
-
     return {
-
-        "name":
-            "AI Agent Platform",
-
-        "status":
-            "online",
-
-        "version":
-            "1.0.0"
+        "name": "AI Agent Platform",
+        "status": "online",
+        "version": "1.0.0"
     }
 
 
 @app.get("/health")
 def health():
-
     return {
-
-        "status":
-            "healthy",
-
-        "service":
-            "ai-agent-platform"
+        "status": "healthy",
+        "service": "ai-agent-platform"
     }
