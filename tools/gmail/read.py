@@ -2,7 +2,6 @@ import base64
 import html
 import re
 from email.header import decode_header
-
 from tools.gmail.client import GmailClient
 
 
@@ -18,48 +17,68 @@ class GmailReader:
 
     def __init__(self):
         self.client = GmailClient()
-        self.service = self.client.get_service()
 
     def get_unread_messages(self, limit=10):
-        results = self.service.users().messages().list(
-            userId="me",
-            labelIds=["UNREAD"],
-            maxResults=limit
-        ).execute()
+        service = self.client.get_service()
+        if service is None:
+            # Demo mode fallback
+            return [
+                {
+                    "id": "demo_msg_001",
+                    "thread_id": "demo_thread_001",
+                    "subject": "[Demo] Strategic Partnership & Integration Proposal",
+                    "from": "Alex Rivera <alex.rivera@partnerorg.com>",
+                    "snippet": "Hi Team, we reviewed your AI platform and would love to explore a joint executive integration. Attached is our proposal..."
+                },
+                {
+                    "id": "demo_msg_002",
+                    "thread_id": "demo_thread_002",
+                    "subject": "[Demo] Enterprise SaaS Expansion Inquiry",
+                    "from": "Sarah Chen <sarah@enterprise-saas.io>",
+                    "snippet": "Hello, we are interested in deploying your autonomous agent workspace across our 50-person engineering team..."
+                }
+            ]
 
-        messages = results.get("messages", [])
-        emails = []
-
-        for msg in messages:
-            message = self.service.users().messages().get(
+        try:
+            results = service.users().messages().list(
                 userId="me",
-                id=msg["id"],
-                format="full"
+                labelIds=["UNREAD"],
+                maxResults=limit
             ).execute()
 
-            headers = message.get("payload", {}).get("headers", [])
+            messages = results.get("messages", [])
+            emails = []
 
-            subject = ""
-            sender = ""
+            for msg in messages:
+                message = service.users().messages().get(
+                    userId="me",
+                    id=msg["id"],
+                    format="full"
+                ).execute()
 
-            for header in headers:
-                if header["name"] == "Subject":
-                    subject = header["value"]
-                elif header["name"] == "From":
-                    sender = header["value"]
+                headers = message.get("payload", {}).get("headers", [])
+                subject = ""
+                sender = ""
 
-            snippet = message.get("snippet", "")
+                for header in headers:
+                    if header["name"] == "Subject":
+                        subject = header["value"]
+                    elif header["name"] == "From":
+                        sender = header["value"]
 
-            emails.append({
-                "id": msg["id"],
-                "thread_id": message.get("threadId", msg.get("threadId", "")),
-                "subject": _clean(subject),
-                "from": _clean(sender),
-                "snippet": _clean(snippet)
-            })
+                snippet = message.get("snippet", "")
 
+                emails.append({
+                    "id": msg["id"],
+                    "thread_id": message.get("threadId", msg.get("threadId", "")),
+                    "subject": _clean(subject),
+                    "from": _clean(sender),
+                    "snippet": _clean(snippet)
+                })
 
-        return emails
+            return emails
+        except Exception as error:
+            print(f"[GmailReader] Error: {error}. Falling back to demo mode.")
+            return self.get_unread_messages(limit=limit)
 
-    # Alias for convenience
     get_unread_emails = get_unread_messages
