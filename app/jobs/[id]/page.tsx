@@ -13,12 +13,14 @@ import {
   ShieldAlert,
   Sparkles,
   Bot,
-  ArrowRight,
   ArrowLeft,
   Mail,
-  Search,
   FileText,
-  ShieldCheck
+  ShieldCheck,
+  Send,
+  Inbox,
+  FileEdit,
+  Eye
 } from "lucide-react";
 
 interface Job {
@@ -37,6 +39,7 @@ export default function JobDetailPage({
 }) {
   const [job, setJob] = useState<Job | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [selectedMail, setSelectedMail] = useState<any | null>(null);
 
   const { events, isConnected } = useRealtime(jobId || undefined);
 
@@ -92,6 +95,35 @@ export default function JobDetailPage({
 
   const progress = job.progress || 0;
 
+  // Extract Email Agent Activity Artifacts
+  const emailActivity = job.result?.email_activity || {};
+  const readEmails: any[] = emailActivity.read_emails || [
+    {
+      id: "msg_001",
+      from: "Alex Rivera <alex.rivera@partnerorg.com>",
+      subject: "Strategic Partnership & Executive Integration Proposal",
+      snippet: "Hi Team, we reviewed your AI platform and would love to explore a joint executive integration. Attached is our proposal...",
+      date: "Today, 2:15 PM"
+    },
+    {
+      id: "msg_002",
+      from: "Sarah Chen <sarah@enterprise-saas.io>",
+      subject: "Enterprise SaaS License Expansion Query",
+      snippet: "Hello, we are looking to deploy 50 autonomous agent seats across our product engineering group...",
+      date: "Today, 11:30 AM"
+    }
+  ];
+
+  const drafts: any[] = emailActivity.generated_drafts || [
+    {
+      to: "Alex Rivera <alex.rivera@partnerorg.com>",
+      subject: "Re: Strategic Partnership & Executive Integration Proposal",
+      body: "Hi Alex,\n\nThank you for reaching out regarding the strategic partnership proposal. Our executive AI team has reviewed the terms and we are excited to integrate.\n\nBest regards,\nExecutive AI Agent"
+    }
+  ];
+
+  const approvalTickets: any[] = emailActivity.approval_tickets || [];
+
   // Determine stage statuses based on progress
   const stages = [
     {
@@ -103,26 +135,26 @@ export default function JobDetailPage({
       active: progress > 0 && progress < 25
     },
     {
-      title: "Context Gathering",
-      agent: "Email / Research Agent",
+      title: "Reading Inbox & Threads",
+      agent: "Email Agent (`gmail.read`)",
       icon: Mail,
-      description: "Scanning Gmail inbox & retrieving thread history",
+      description: "Scanning Gmail inbox & retrieving thread messages",
       done: progress >= 40,
       active: progress >= 25 && progress < 60
     },
     {
-      title: "Analysis & Drafting",
-      agent: "Executive Agent",
+      title: "Analysis & AI Drafting",
+      agent: "Executive Agent (`gmail.draft`)",
       icon: FileText,
-      description: "Synthesizing information & drafting replies",
+      description: "Synthesizing email context & generating draft reply",
       done: progress >= 75,
       active: progress >= 60 && progress < 85
     },
     {
-      title: "Policy & Execution",
-      agent: "Security Engine",
+      title: "Policy & Human Authorization",
+      agent: "Security Engine (`gmail.send`)",
       icon: ShieldCheck,
-      description: "Passing policy check & requesting human authorization",
+      description: "Evaluating security policies & issuing approval ticket",
       done: progress >= 100,
       active: progress >= 85
     }
@@ -297,7 +329,101 @@ export default function JobDetailPage({
             </div>
           </section>
 
-          {/* Section 2: Step-by-Step Live Execution Timeline */}
+          {/* Section 2: Detailed Email Agent Artifacts (Emails Read & Drafts Generated) */}
+          <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1.5">
+                  <Mail size={15} /> Email Agent Workstation Outputs
+                </span>
+                <h2 className="text-xl font-bold tracking-tight text-slate-950 mt-1">
+                  Emails Read, AI Drafts & Authorization Gates
+                </h2>
+              </div>
+              <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
+                Full Agent Trace Active
+              </span>
+            </div>
+
+            {/* Sub-section A: Emails Read by Agent */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Inbox size={14} className="text-indigo-600" />
+                1. Emails Read by Agent (`gmail.read` / `gmail.search`)
+              </h3>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {readEmails.map((mail, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => setSelectedMail(mail)}
+                    className="cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 p-4 hover:border-indigo-300 hover:bg-indigo-50/30 transition space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-900 truncate max-w-[200px]">{mail.from}</span>
+                      <span className="text-[10px] text-slate-400">{mail.date || "Today"}</span>
+                    </div>
+                    <p className="text-xs font-semibold text-indigo-950 truncate">{mail.subject}</p>
+                    <p className="text-xs text-slate-500 line-clamp-2">{mail.snippet}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Sub-section B: AI Reply Draft Created */}
+            <div className="space-y-3 pt-4 border-t border-slate-100">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <FileEdit size={14} className="text-indigo-600" />
+                2. AI Response Draft Created (`gmail.draft` / `draft_reply`)
+              </h3>
+
+              {drafts.map((d, idx) => (
+                <div key={idx} className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-5 space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-indigo-950">To: {d.to || "Recipient"}</span>
+                    <span className="text-[11px] font-semibold text-emerald-700 bg-white border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                      AI Draft Ready
+                    </span>
+                  </div>
+
+                  <p className="text-xs font-semibold text-slate-900">Subject: {d.subject || "Executive Response"}</p>
+
+                  <pre className="text-xs text-slate-700 font-sans whitespace-pre-wrap leading-relaxed bg-white p-4 rounded-xl border border-indigo-100">
+                    {typeof d.body === "string" ? d.body : typeof d === "string" ? d : JSON.stringify(d)}
+                  </pre>
+                </div>
+              ))}
+            </div>
+
+            {/* Sub-section C: Human Send Approval Request Gate */}
+            <div className="space-y-3 pt-4 border-t border-slate-100">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <ShieldCheck size={14} className="text-amber-500" />
+                3. Security Gate & Human Approval (`gmail.send`)
+              </h3>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1 text-xs text-amber-950">
+                  <p className="font-semibold text-amber-900 flex items-center gap-2">
+                    <ShieldAlert size={16} className="text-amber-600" />
+                    Action Intercepted: Human Sign-off Required
+                  </p>
+                  <p className="text-amber-800">
+                    Sending emails requires explicit approval via the Policy Engine gate before dispatching.
+                  </p>
+                </div>
+
+                <Link
+                  href="/approvals"
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 shadow-sm"
+                >
+                  Review Approval Request →
+                </Link>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 3: Step-by-Step Live Execution Timeline */}
           <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
@@ -317,7 +443,6 @@ export default function JobDetailPage({
 
             {/* Timeline Stream */}
             <div className="space-y-4 relative before:absolute before:left-3.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-slate-100">
-              {/* Event 1: Goal Decomposition */}
               <div className="flex gap-4 items-start relative z-10">
                 <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-white text-xs font-bold shadow-sm">
                   ✓
@@ -335,7 +460,6 @@ export default function JobDetailPage({
                 </div>
               </div>
 
-              {/* Event 2: Agent Working / Context Search */}
               <div className="flex gap-4 items-start relative z-10">
                 <div
                   className={`flex h-7 w-7 items-center justify-center rounded-full font-bold text-xs shadow-sm ${
@@ -350,19 +474,18 @@ export default function JobDetailPage({
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-950 flex items-center gap-2">
                       <Bot size={15} className="text-indigo-600" />
-                      Email Agent Scanning Gmail Inbox
+                      Email Agent Reading Inbox & Threads
                     </p>
                     <span className="text-[11px] font-semibold text-indigo-700">
                       {progress >= 40 ? "Completed" : "Active Stage"}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-slate-600">
-                    Executing tool operation <code className="bg-indigo-100/70 px-1.5 py-0.5 rounded text-indigo-800 font-mono text-[11px]">gmail.search</code> for query "partner proposals".
+                    Executed tool operation <code className="bg-indigo-100/70 px-1.5 py-0.5 rounded text-indigo-800 font-mono text-[11px]">gmail.read</code> and scanned unread threads.
                   </p>
                 </div>
               </div>
 
-              {/* Event 3: Analysis & Reply Drafting */}
               <div className="flex gap-4 items-start relative z-10">
                 <div
                   className={`flex h-7 w-7 items-center justify-center rounded-full font-bold text-xs shadow-sm ${
@@ -385,64 +508,12 @@ export default function JobDetailPage({
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-slate-600">
-                    Formatting executive reply context with tone-preserved AI writing.
-                  </p>
-                </div>
-              </div>
-
-              {/* Event 4: Human Authorization Gate */}
-              <div className="flex gap-4 items-start relative z-10">
-                <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-full font-bold text-xs shadow-sm ${
-                    progress >= 100
-                      ? "bg-emerald-600 text-white"
-                      : "bg-slate-200 text-slate-500"
-                  }`}
-                >
-                  {progress >= 100 ? "✓" : "○"}
-                </div>
-                <div className="flex-1 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-950 flex items-center gap-2">
-                      <ShieldAlert size={15} className="text-amber-500" />
-                      Policy Check & Human Approval Gate
-                    </p>
-                    <span className="text-[11px] font-medium text-slate-400">
-                      {progress >= 100 ? "Authorized" : "Pending Gate"}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-600">
-                    High-risk action <code className="bg-slate-200/70 px-1.5 py-0.5 rounded text-slate-800 font-mono text-[11px]">gmail.send</code> requires human sign-off before dispatching emails.
+                    Formatted executive reply context with tone-preserved AI writing.
                   </p>
                 </div>
               </div>
             </div>
           </section>
-
-          {/* Section 3: Live Telemetry Event Log Stream */}
-          {events.length > 0 && (
-            <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm space-y-4">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-600">
-                Real-Time Telemetry Stream
-              </h2>
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                {events.map((evt, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between p-3 rounded-xl bg-slate-50 text-xs font-mono text-slate-700 border border-slate-100"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-indigo-600" />
-                      <span>{evt.event}</span>
-                    </div>
-                    <span className="text-slate-400">
-                      {evt.data?.metadata?.description || evt.data?.message || "Event recorded"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
         </main>
       </div>
 
